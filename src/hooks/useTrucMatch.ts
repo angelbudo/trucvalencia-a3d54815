@@ -1641,6 +1641,7 @@ export function useTrucMatch(options: UseTrucMatchOptions = {}) {
         forceEnvit?: boolean;
         rivalShownStrength?: boolean;
         saidAlgoTinc?: boolean;
+        partnerSaidATu?: boolean;
       } = {};
       // Mode sincer: detecta si algun rival d'aquest bot ha dit
       // "vine-a-mi" o "tinc-bona" en aquesta ronda. Aplica per a TOTS
@@ -1659,6 +1660,9 @@ export function useTrucMatch(options: UseTrucMatchOptions = {}) {
       if (rivalSignaled) hints.rivalShownStrength = true;
       if (chatSignalsRef.current[botPlayer]?.includes("tinc-bona")) {
         hints.saidAlgoTinc = true;
+      }
+      if (chatSignalsRef.current[partnerOf(botPlayer)]?.includes("a-tu")) {
+        hints.partnerSaidATu = true;
       }
 
       // Compromís personal del propi bot: si en aquesta baza ha respost
