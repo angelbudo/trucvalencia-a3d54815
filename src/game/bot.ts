@@ -1727,7 +1727,8 @@ function botDecideInner(
     // punt de tancar la cama), l'envit val 1 punt sí o sí — querit o no
     // querit. Acceptar (vull) és sempre l'opció dominant: si guanyem
     // l'envit ens emportem 1; si el rebutgem, li regalem 1 al rival.
-    if (isCamaMatchPoint(m)) {
+    // Perfil CONSERVADOR amb envit ≤30: mai accepta (tampoc al match-point).
+    if (!(tuning.conservativeMode && myEnvit <= 30) && isCamaMatchPoint(m)) {
       const vull = actions.find((a) => a.type === "shout" && a.what === "vull");
       if (vull) return vull;
     }
@@ -2266,6 +2267,19 @@ function botDecideInner(
   if (canEnvit && hints.forceEnvit) {
     return { type: "shout", what: "envit" };
   }
+  // ---- Perfil CONSERVADOR amb envit baix (≤30): regla de cants ----
+  // Regla general: amb 30 punts d'envit o menys, el bot conservador NO
+  // canta envit per iniciativa pròpia.
+  // Excepció única: 1a baza (cap envit cantat encara a la ronda) i sóc
+  // l'últim en parlar/tirar de la 1a baza (hi ha 3 cartes a la taula).
+  const conservativeEnvitBlocked =
+    tuning.conservativeMode === true && myEnvit <= 30;
+  const conservativeEnvitLastSpeak =
+    r.tricks.length === 1 &&
+    r.envitState.kind === "none" &&
+    (r.tricks[r.tricks.length - 1]?.cards.length ?? 0) === 3;
+  const conservativeCanEnvit =
+    canEnvit && (!conservativeEnvitBlocked || conservativeEnvitLastSpeak);
   // Estratègia: la MÀ (primer jugador de la pareja) NO envida proactivament.
   // En lloc d'envidar i encadenar truc (combo "Envit + Truc" que sol donar
   // pocs punts perquè el rival pot rebutjar el truc i quedar-se l'envit
