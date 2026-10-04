@@ -1397,34 +1397,6 @@ function applyProtect3VsRivalSignals(
   return act ?? decision;
 }
 
-/**
- * Perfil CONSERVADOR: pot el bot cantar/iniciar un Envit per ell mateix?
- * Només si es compleix ALMENYS UNA d'aquestes condicions:
- *  1. Ordre directa del company ("Envida!") -> obeeix sempre.
- *  2. Força pròpia alta: 31, 32 o 33 d'envit.
- *  3. Últim a parlar de la 1a baza (3 cartes a la taula, cap envit cantat)
- *     amb exactament 30 d'envit.
- * Qualsevol altre cas (p. ex. <30, o 30 sense ser l'últim) és PROHIBIT.
- * Si el perfil no és conservador, sempre retorna true (sense restriccions).
- */
-export function conservativeMayCallEnvit(
-  round: MatchState["round"],
-  player: PlayerId,
-  conservative: boolean,
-  orderedByPartner: boolean,
-): boolean {
-  if (!conservative) return true;
-  if (orderedByPartner) return true;
-  const e = playerTotalEnvit(round, player);
-  if (e >= 31) return true;
-  return (
-    e === 30 &&
-    round.tricks.length === 1 &&
-    round.envitState.kind === "none" &&
-    (round.tricks[round.tricks.length - 1]?.cards.length ?? 0) === 3
-  );
-}
-
 export function botDecide(
   m: MatchState,
   player: PlayerId,
@@ -1453,26 +1425,28 @@ function botDecideCore(
   bluffRate: number = 0,
 
 ): Action | null {
-  // Perfil CONSERVADOR: regla estricta per a CANTAR envit. Només pot
-  // iniciar-lo per ordre directa del company, amb 31-33 d'envit, o amb
-  // exactament 30 sent l'ÚLTIM a parlar de la 1a baza (3 cartes a la
-  // taula, cap envit cantat). S'avalua ABANS de les regles de carta
-  // perquè aquestes (Regles #2/#3, matrius) tindrien prioritat i
-  // deixarien l'excepció morta.
-  if (tuning.conservativeMode) {
+  // Perfil CONSERVADOR amb envit baix (≤30): excepció única de cant.
+  // Només pot envidar per iniciativa pròpia sent l'ÚLTIM a parlar/tirar
+  // de la 1a baza (3 cartes a la taula, cap envit cantat encara). S'avalua
+  // ABANS de les regles de carta perquè aquestes (Regles #2/#3, matrius)
+  // tindrien prioritat i deixarien l'excepció morta.
+  {
     const rExc = m.round;
     const excEnvitAvailable = legalActions(m, player).some(
       (a) => a.type === "shout" && a.what === "envit",
     );
-    if (excEnvitAvailable && rExc.trucState.kind !== "pending") {
-      if (hints.forceEnvit) return { type: "shout", what: "envit" };
-      const excEnvit = playerTotalEnvit(rExc, player);
-      if (
-        excEnvit === 30 &&
-        conservativeMayCallEnvit(rExc, player, true, false)
-      ) {
-        return { type: "shout", what: "envit" };
-      }
+    const excLastSpeaker =
+      rExc.tricks.length === 1 &&
+      rExc.envitState.kind === "none" &&
+      rExc.trucState.kind !== "pending" &&
+      (rExc.tricks[rExc.tricks.length - 1]?.cards.length ?? 0) === 3;
+    if (
+      tuning.conservativeMode &&
+      playerTotalEnvit(rExc, player) <= 30 &&
+      excEnvitAvailable &&
+      excLastSpeaker
+    ) {
+      return { type: "shout", what: "envit" };
     }
   }
 
@@ -2416,9 +2390,14 @@ function botDecideInner(
   // canta envit per iniciativa pròpia.
   // Excepció única: 1a baza (cap envit cantat encara a la ronda) i sóc
   // l'últim en parlar/tirar de la 1a baza (hi ha 3 cartes a la taula).
+  const conservativeEnvitBlocked =
+    tuning.conservativeMode === true && myEnvit <= 30;
+  const conservativeEnvitLastSpeak =
+    r.tricks.length === 1 &&
+    r.envitState.kind === "none" &&
+    (r.tricks[r.tricks.length - 1]?.cards.length ?? 0) === 3;
   const conservativeCanEnvit =
-    canEnvit &&
-    conservativeMayCallEnvit(r, player, tuning.conservativeMode === true, false);
+    canEnvit && (!conservativeEnvitBlocked || conservativeEnvitLastSpeak);
   // Estratègia: la MÀ (primer jugador de la pareja) NO envida proactivament.
   // En lloc d'envidar i encadenar truc (combo "Envit + Truc" que sol donar
   // pocs punts perquè el rival pot rebutjar el truc i quedar-se l'envit
