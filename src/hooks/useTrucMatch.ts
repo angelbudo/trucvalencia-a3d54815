@@ -1744,6 +1744,13 @@ export function useTrucMatch(options: UseTrucMatchOptions = {}) {
     const botCanEnvitNow = legalActions(match, botPlayer).some(
       (a) => a.type === "shout" && a.what === "envit",
     );
+    // Perfil CONSERVADOR: el bot que canta (actor) amb ≤30 d'envit només
+    // pot cantar l'envit ordenat si és l'últim a parlar de la 1a baza
+    // (3 cartes a la taula); altrament no canta (regla ≤30).
+    const conservativeActorCanEnvit =
+      !tuningRef.current.conservativeMode ||
+      playerTotalEnvit(r, botPlayer) > 30 ||
+      (r.tricks[r.tricks.length - 1]?.cards.length ?? 0) === 3;
     if (
       isPlayCardTurn &&
       r.tricks.length === 1 &&
@@ -1751,6 +1758,7 @@ export function useTrucMatch(options: UseTrucMatchOptions = {}) {
       !r.envitResolved &&
       botPartnerForEnvit !== HUMAN &&
       botCanEnvitNow &&
+      conservativeActorCanEnvit &&
       shouldIssueProactiveEnvitOrder(playerTotalEnvit(r, botPartnerForEnvit), {
         trickIndex: trickIdx,
         actor: botPlayer,
