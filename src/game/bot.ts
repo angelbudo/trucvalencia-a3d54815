@@ -1332,6 +1332,30 @@ function botDecideCore(
   bluffRate: number = 0,
 
 ): Action | null {
+  // Perfil CONSERVADOR amb envit baix (≤30): excepció única de cant.
+  // Només pot envidar per iniciativa pròpia sent l'ÚLTIM a parlar/tirar
+  // de la 1a baza (3 cartes a la taula, cap envit cantat encara). S'avalua
+  // ABANS de les regles de carta perquè aquestes (Regles #2/#3, matrius)
+  // tindrien prioritat i deixarien l'excepció morta.
+  {
+    const rExc = m.round;
+    const excEnvitAvailable = legalActions(m, player).some(
+      (a) => a.type === "shout" && a.what === "envit",
+    );
+    const excLastSpeaker =
+      rExc.tricks.length === 1 &&
+      rExc.envitState.kind === "none" &&
+      (rExc.tricks[rExc.tricks.length - 1]?.cards.length ?? 0) === 3;
+    if (
+      tuning.conservativeMode &&
+      playerTotalEnvit(rExc, player) <= 30 &&
+      excEnvitAvailable &&
+      excLastSpeaker
+    ) {
+      return { type: "shout", what: "envit" };
+    }
+  }
+
   // Regles de prioritat absoluta (Regles #2 i #3): s'avaluen ABANS
   // que qualsevol lògica genèrica per evitar solapaments.
   const priority = applyPriorityRules(m, player, hints);
