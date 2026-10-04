@@ -342,6 +342,14 @@ function applyThirdSeatSecondBazaWonFirst(
   // una regla superior.
   // =====================================================================
 
+  // ---- REGLA 0: el company ja va guanyant (o empardant) la baza actual
+  // amb almenys un 3 → no pisar-lo ni gastar cartes altes: la MÉS BAIXA.
+  // La posició (3r a tirar) es determina per trick.cards.length === 2.
+  if (partnerWinsOrTies && partnerStr >= 70) {
+    const play = findPlay(lowest.id);
+    if (play) return play;
+  }
+
   // ---- REGLA 1: rival guanya amb 3 i jo tinc 3 → EMPARDAR amb el 3.
   if (!partnerWinsOrTies && oppCard.card.rank === 3 && hasThree) {
     const play = findPlay(lowestThree!.id);
@@ -384,7 +392,7 @@ function applyThirdSeatSecondBazaWonFirst(
 
   // ---- REGLA 5: 1 TOP NO absoluta (sense 3) → 50% TRUCAR + tirar TOP.
   else if (nTops === 1 && !iHaveHighestAliveTop && nThrees === 0) {
-    if (trucNotDecided && Math.random() < 0.5) {
+    if (trucNotDecided && !partnerWinsOrTies) {
       const truc = canShoutTruc();
       if (truc) return truc;
     }
@@ -400,7 +408,7 @@ function applyThirdSeatSecondBazaWonFirst(
       const play = findPlay(lowest.id);
       if (play) return play;
     } else {
-      if (trucNotDecided && Math.random() < 0.5) {
+      if (trucNotDecided) {
         const truc = canShoutTruc();
         if (truc) return truc;
       }
@@ -434,7 +442,7 @@ function applyThirdSeatSecondBazaWonFirst(
       const play = findPlay(highest.id);
       if (play) return play;
     } else {
-      const partnerReinforceable = partnerStr >= 60;
+      const partnerReinforceable = partnerStr >= 70;
       const pick = partnerReinforceable ? lowest : highest;
       const play = findPlay(pick.id);
       if (play) return play;
