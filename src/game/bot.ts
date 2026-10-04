@@ -1345,6 +1345,7 @@ function botDecideCore(
     const excLastSpeaker =
       rExc.tricks.length === 1 &&
       rExc.envitState.kind === "none" &&
+      rExc.trucState.kind !== "pending" &&
       (rExc.tricks[rExc.tricks.length - 1]?.cards.length ?? 0) === 3;
     if (
       tuning.conservativeMode &&
