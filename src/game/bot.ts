@@ -1,6 +1,6 @@
 import type { Action, Card, MatchState, PlayerId } from "./types";
 import { isCamaMatchPoint, legalActions } from "./engine";
-import { bestEnvit, buildDeck, cardStrength, playerTotalEnvit } from "./deck";
+import { bestEnvit, buildDeck, cardStrength, isRealCard, playerTotalEnvit } from "./deck";
 import { teamOf } from "./types";
 import type { PartnerAdvice } from "./botConsult";
 import { pickFortSignalCard, pickMolestoCard, pickTresCard, type CardHint, type PlayStrengthHint } from "./playerIntents";
