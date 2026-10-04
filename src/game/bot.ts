@@ -1163,6 +1163,111 @@ function applySecondTrickWonFirstStrict(
 }
 
 /**
+ * REGLA "PARDA TANCA LA MÀ" (2a baza — i 3a baza amb 1-1):
+ *
+ * El motor resol la mà així (vegeu `maybeFinishRound` a engine.ts):
+ *   · Regla 3: si la 2a baza queda PARDA i la 1a no, guanya qui va
+ *     guanyar la 1a. Per tant, si nosaltres vam guanyar la 1a, empatar
+ *     la 2a tanca la mà a favor nostre immediatament.
+ *   · Regla 5: amb 1-1 a les dues primeres, una 3a baza parda també dona
+ *     la mà a qui va guanyar la 1a.
+ *
+ * Així, quan la millor carta de la mesa és d'un rival i tenim una carta
+ * d'IGUAL força (l'empararem), hem de tirar-la: no importa si encara ens
+ * queda una Carta TOP per jugar, perquè l'empat ja ens dona la mà. Les
+ * demés regles comparaven només de manera estricta (carta pròpia > carta
+ * rival) i per això, davant d'un 3 rival amb un altre 3 a la mà, acabaven
+ * en un descart baix.
+ *
+ * S'aplica com a overriding FINAL sobre la decisió ja presa, perquè cap
+ * regla de "guardar la TOP per a la 3a" ni de "descartar la més baixa"
+ * puga deixar-la sense efecte.
+ */
+function applyPardaClosesHand(
+  m: MatchState,
+  player: PlayerId,
+  decision: Action,
+): Action {
+  if (decision.type !== "play-card") return decision;
+  const r = m.round;
+  if (r.phase !== "playing") return decision;
+  const myTeam = teamOf(player);
+
+  // Condició prèvia: el nostre equip ha guanyat la 1a baza (no parda).
+  const t1 = r.tricks[0];
+  if (!t1 || t1.parda === true || t1.winner === undefined) return decision;
+  if (teamOf(t1.winner) !== myTeam) return decision;
+
+  // Baza en curs (l'última de `r.tricks`), on encara no hem jugat.
+  const cur = r.tricks[r.tricks.length - 1];
+  if (!cur || cur.cards.length === 0) return decision;
+  if (cur.cards.some((tc) => tc.player === player)) return decision;
+
+  // ¿Una parda en aquesta baza tanca la mà a favor nostre?
+  const pardaWinsHand = (() => {
+    if (r.tricks.length === 2) return true; // Regla 3
+    if (r.tricks.length === 3) {
+      const t2 = r.tricks[1];
+      if (!t2) return false;
+      // 1-1 sense pardes → Regla 5: la 3a parda dona la qui va guanyar la 1a.
+      if (
+        t2.parda !== true &&
+        t2.winner !== undefined &&
+        teamOf(t2.winner) !== myTeam
+      ) {
+        return true;
+      }
+      // 1a i 2a pardes → Regla 4: la 3a parda dona la mà de l'equip de la mà.
+      if (t2.parda === true && teamOf(r.mano) === myTeam) return true;
+    }
+    return false;
+  })();
+  if (!pardaWinsHand) return decision;
+
+  // Millor carta NO TAPADA de la mesa. Si la porta el company no el
+  // pisquem (regla de l'usuari): només actuem quan la millor és d'un rival.
+  const tableBest = cur.cards
+    .filter((tc) => !tc.covered)
+    .reduce((mx, tc) => Math.max(mx, cardStrength(tc.card)), -1);
+  if (tableBest < 0) return decision;
+  const rivalHoldsBest = cur.cards.some(
+    (tc) =>
+      !tc.covered &&
+      teamOf(tc.player) !== myTeam &&
+      cardStrength(tc.card) === tableBest,
+  );
+  if (!rivalHoldsBest) return decision;
+
+  // La carta ja triada guanya o empata la mesa boca amunt? → no cal canviar.
+  const chosen = (r.hands[player] ?? []).find((c) => c.id === decision.cardId);
+  if (!decision.covered && chosen && cardStrength(chosen) >= tableBest) {
+    return decision;
+  }
+
+  // Busquem una carta que EMPARDE exactament la mesa (força igual). Si
+  // n'hi ha diverses, preferim un 3: és la que obliga el rival a gastar
+  // una TOP si la vol batre.
+  const legals = legalActions(m, player);
+  const playableIds = new Set(
+    legals
+      .filter(
+        (a): a is Extract<Action, { type: "play-card" }> =>
+          a.type === "play-card" && !a.covered,
+      )
+      .map((a) => a.cardId),
+  );
+  const tiers = (r.hands[player] ?? [])
+    .filter(
+      (c) =>
+        isRealCard(c) && playableIds.has(c.id) && cardStrength(c) === tableBest,
+    )
+    .sort((a, b) => (b.rank === 3 ? 1 : 0) - (a.rank === 3 ? 1 : 0));
+  const tie = tiers[0];
+  if (!tie) return decision;
+  return { type: "play-card", cardId: tie.id };
+}
+
+/**
  * Regla "Algo tinc" (1a baza): si el bot ha dit "Algo tinc" i el seu company
  * ha jugat a la 1a baza una carta que NO és ni un 3 ni una Top, el bot ha de
  * jugar una Carta Top (prioritzant-la sobre el 3, que es reserva), sempre
@@ -1211,7 +1316,10 @@ export function botDecide(
 ): Action | null {
   const decision = botDecideCore(m, player, partnerAdvice, hints, tuning, bluffRate);
   if (!decision) return decision;
-  return applyAlgoTincFirstBaza(m, player, hints, decision);
+  // La parda que tanca la mà té prioritat sobre qualsevol descart baix o
+  // sobre "guardar la TOP" (vegeu `applyPardaClosesHand`).
+  const parda = applyPardaClosesHand(m, player, decision);
+  return applyAlgoTincFirstBaza(m, player, hints, parda);
 }
 
 function botDecideCore(
