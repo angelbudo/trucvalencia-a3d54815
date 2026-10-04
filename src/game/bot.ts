@@ -28,6 +28,12 @@ export interface BotHints {
    * d'oros) confiant que la mesa és inofensiva.
    */
   rivalShownStrength?: boolean;
+  /**
+   * El propi bot ha dit "Algo tinc" (tinc-bona) en aquesta ronda: confirma
+   * que té almenys una carta Top. Activa la regla de la 1a baza
+   * (`applyAlgoTincFirstBaza`).
+   */
+  saidAlgoTinc?: boolean;
 }
 
 /** Carta TOP del Truc: As d'espases, As de bastos, 7 d'espases, 7 d'oros. */
@@ -1148,7 +1154,59 @@ function applySecondTrickWonFirstStrict(
   return null;
 }
 
+/**
+ * Regla "Algo tinc" (1a baza): si el bot ha dit "Algo tinc" i el seu company
+ * ha jugat a la 1a baza una carta que NO és ni un 3 ni una Top, el bot ha de
+ * jugar una Carta Top (prioritzant-la sobre el 3, que es reserva), sempre
+ * que amb ella supere totes les cartes rivals (no tapades) de la mesa.
+ * Si cap Top supera el rival, no s'intervé (lògica defensiva habitual).
+ */
+function applyAlgoTincFirstBaza(
+  m: MatchState,
+  player: PlayerId,
+  hints: BotHints,
+  decision: Action,
+): Action {
+  if (!hints.saidAlgoTinc || decision.type !== "play-card") return decision;
+  const r = m.round;
+  if (r.phase !== "playing" || r.tricks.length !== 1 || r.turn !== player) return decision;
+  const trick = r.tricks[0];
+  if (!trick || trick.cards.some((tc) => tc.player === player)) return decision;
+  const myTeam = teamOf(player);
+  const partnerCard = trick.cards.find(
+    (tc) => teamOf(tc.player) === myTeam && tc.player !== player,
+  );
+  if (!partnerCard) return decision;
+  if (partnerCard.card.rank === 3 || isTopCard(partnerCard.card)) return decision;
+
+  const rivalMax = trick.cards
+    .filter((tc) => !tc.covered && teamOf(tc.player) !== myTeam)
+    .reduce((mx, tc) => Math.max(mx, cardStrength(tc.card)), -1);
+  const winningTops = (r.hands[player] ?? [])
+    .filter((c) => isTopCard(c) && cardStrength(c) > rivalMax)
+    .sort((a, b) => cardStrength(a) - cardStrength(b));
+  const chosen = winningTops[0];
+  if (!chosen) return decision;
+  const act = legalActions(m, player).find(
+    (a) => a.type === "play-card" && a.cardId === chosen.id && !a.covered,
+  );
+  return act ?? decision;
+}
+
 export function botDecide(
+  m: MatchState,
+  player: PlayerId,
+  partnerAdvice: PartnerAdvice = "neutral",
+  hints: BotHints = {},
+  tuning: BotTuning = NEUTRAL_TUNING,
+  bluffRate: number = 0,
+): Action | null {
+  const decision = botDecideCore(m, player, partnerAdvice, hints, tuning, bluffRate);
+  if (!decision) return decision;
+  return applyAlgoTincFirstBaza(m, player, hints, decision);
+}
+
+function botDecideCore(
 
   m: MatchState,
   player: PlayerId,
