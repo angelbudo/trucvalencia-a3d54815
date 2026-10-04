@@ -1332,6 +1332,31 @@ function botDecideCore(
   bluffRate: number = 0,
 
 ): Action | null {
+  // Perfil CONSERVADOR amb envit baix (≤30): excepció única de cant.
+  // Només pot envidar per iniciativa pròpia sent l'ÚLTIM a parlar/tirar
+  // de la 1a baza (3 cartes a la taula, cap envit cantat encara). S'avalua
+  // ABANS de les regles de carta perquè aquestes (Regles #2/#3, matrius)
+  // tindrien prioritat i deixarien l'excepció morta.
+  {
+    const rExc = m.round;
+    const excEnvitAvailable = legalActions(m, player).some(
+      (a) => a.type === "shout" && a.what === "envit",
+    );
+    const excLastSpeaker =
+      rExc.tricks.length === 1 &&
+      rExc.envitState.kind === "none" &&
+      rExc.trucState.kind !== "pending" &&
+      (rExc.tricks[rExc.tricks.length - 1]?.cards.length ?? 0) === 3;
+    if (
+      tuning.conservativeMode &&
+      playerTotalEnvit(rExc, player) <= 30 &&
+      excEnvitAvailable &&
+      excLastSpeaker
+    ) {
+      return { type: "shout", what: "envit" };
+    }
+  }
+
   // Regles de prioritat absoluta (Regles #2 i #3): s'avaluen ABANS
   // que qualsevol lògica genèrica per evitar solapaments.
   const priority = applyPriorityRules(m, player, hints);
@@ -1727,7 +1752,8 @@ function botDecideInner(
     // punt de tancar la cama), l'envit val 1 punt sí o sí — querit o no
     // querit. Acceptar (vull) és sempre l'opció dominant: si guanyem
     // l'envit ens emportem 1; si el rebutgem, li regalem 1 al rival.
-    if (isCamaMatchPoint(m)) {
+    // Perfil CONSERVADOR amb envit ≤30: mai accepta (tampoc al match-point).
+    if (!(tuning.conservativeMode && myEnvit <= 30) && isCamaMatchPoint(m)) {
       const vull = actions.find((a) => a.type === "shout" && a.what === "vull");
       if (vull) return vull;
     }
@@ -2266,6 +2292,19 @@ function botDecideInner(
   if (canEnvit && hints.forceEnvit) {
     return { type: "shout", what: "envit" };
   }
+  // ---- Perfil CONSERVADOR amb envit baix (≤30): regla de cants ----
+  // Regla general: amb 30 punts d'envit o menys, el bot conservador NO
+  // canta envit per iniciativa pròpia.
+  // Excepció única: 1a baza (cap envit cantat encara a la ronda) i sóc
+  // l'últim en parlar/tirar de la 1a baza (hi ha 3 cartes a la taula).
+  const conservativeEnvitBlocked =
+    tuning.conservativeMode === true && myEnvit <= 30;
+  const conservativeEnvitLastSpeak =
+    r.tricks.length === 1 &&
+    r.envitState.kind === "none" &&
+    (r.tricks[r.tricks.length - 1]?.cards.length ?? 0) === 3;
+  const conservativeCanEnvit =
+    canEnvit && (!conservativeEnvitBlocked || conservativeEnvitLastSpeak);
   // Estratègia: la MÀ (primer jugador de la pareja) NO envida proactivament.
   // En lloc d'envidar i encadenar truc (combo "Envit + Truc" que sol donar
   // pocs punts perquè el rival pot rebutjar el truc i quedar-se l'envit
@@ -2282,18 +2321,18 @@ function botDecideInner(
   // Peu amb envit (≥31): envida sí o sí, sense consultar ni esperar.
   // Aquesta excepció es manté fins i tot si és el primer del equip a tirar:
   // tindre 31+ d'envit és una jugada segura que no depèn de l'ordre.
-  if (canEnvit && !isMano && myEnvit >= 31 && firstOfTeamFirstTrickAllowsCall) {
+  if (conservativeCanEnvit && !isMano && myEnvit >= 31 && firstOfTeamFirstTrickAllowsCall) {
     return { type: "shout", what: "envit" };
   }
   // Mode honest (bluffRate === 0): només envida si realment té possibilitats
   // reals de guanyar l'envit (≥31). Si la mà és, envida; si és peu ja s'ha
   // tractat més amunt. Sense farols ni envits especulatius amb 27/30.
   // En mode honest la mà MAI envida proactivament (`envitAllowedForRole`).
-  if (canEnvit && envitAllowedForRole && envitAllowedByPosition && firstOfTeamFirstTrickAllowsCall && bluffRate === 0) {
+  if (conservativeCanEnvit && envitAllowedForRole && envitAllowedByPosition && firstOfTeamFirstTrickAllowsCall && bluffRate === 0) {
     if (myEnvit >= 31) return { type: "shout", what: "envit" };
     // No fer cap altre envit en mode sincer.
   } else
-  if (canEnvit && envitAllowedForRole && envitAllowedByPosition && firstOfTeamFirstTrickAllowsCall && !trapEnvit) {
+  if (conservativeCanEnvit && envitAllowedForRole && envitAllowedByPosition && firstOfTeamFirstTrickAllowsCall && !trapEnvit) {
     if (myEnvit >= 30 && Math.random() < 0.8 * tuning.callPropensity) {
       return { type: "shout", what: "envit" };
     }
@@ -2307,7 +2346,7 @@ function botDecideInner(
   }
   // Amb trampa activa, de tant en tant igualment envida (per no ser previsible).
   // En mode sincer no s'aplica aquesta aleatorietat.
-  if (canEnvit && envitAllowedForRole && envitAllowedByPosition && firstOfTeamFirstTrickAllowsCall && trapEnvit && bluffRate > 0 && Math.random() < 0.12) {
+  if (conservativeCanEnvit && envitAllowedForRole && envitAllowedByPosition && firstOfTeamFirstTrickAllowsCall && trapEnvit && bluffRate > 0 && Math.random() < 0.12) {
     return { type: "shout", what: "envit" };
   }
 
@@ -2503,6 +2542,16 @@ function decideEnvitResponse(
       `trucStrength=${trucStrength.toFixed(2)} trucBonus=${trucBonus.toFixed(2)}`
     );
   };
+
+  // ----- Perfil CONSERVADOR amb envit baix (≤30): mai acceptar -----
+  // Regla estricta SENSE excepcions: davant d'un envit rival (envit,
+  // renvit o falta-envit), amb 30 punts d'envit o menys el bot
+  // conservador respon sempre "no-vull", independentment de la seua
+  // posició a la taula o dels punts en joc.
+  if (tuning.conservativeMode && myEnvit <= 30) {
+    log("no-vull (conservador ≤30, sense excepcions)");
+    return { type: "shout", what: "no-vull" };
+  }
 
   // ----- Resposta a FALTA-ENVIT -----
   // Regla específica del jugador: davant d'una falta-envit, el bot només
