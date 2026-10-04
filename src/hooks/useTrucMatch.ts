@@ -1642,22 +1642,34 @@ export function useTrucMatch(options: UseTrucMatchOptions = {}) {
         rivalShownStrength?: boolean;
         saidAlgoTinc?: boolean;
         partnerSaidATu?: boolean;
+        rivalStrengthSignalers?: PlayerId[];
       } = {};
       // Mode sincer: detecta si algun rival d'aquest bot ha dit
       // "vine-a-mi" o "tinc-bona" en aquesta ronda. Aplica per a TOTS
       // els bots (no només els que tenen humà de company).
       const myTeam = teamOf(botPlayer);
       let rivalSignaled = false;
+      const rivalStrengthSignalers: PlayerId[] = [];
       for (const pStr of Object.keys(chatSignalsRef.current)) {
         const p = Number(pStr) as PlayerId;
         if (teamOf(p) === myTeam) continue;
         const phrases = chatSignalsRef.current[p] ?? [];
+        if (
+          phrases.includes("vine-a-mi") ||
+          phrases.includes("tinc-bona") ||
+          phrases.includes("vine-a-vore")
+        ) {
+          rivalStrengthSignalers.push(p);
+        }
         if (phrases.includes("vine-a-mi") || phrases.includes("tinc-bona")) {
           rivalSignaled = true;
           break;
         }
       }
       if (rivalSignaled) hints.rivalShownStrength = true;
+      if (rivalStrengthSignalers.length > 0) {
+        hints.rivalStrengthSignalers = rivalStrengthSignalers;
+      }
       if (chatSignalsRef.current[botPlayer]?.includes("tinc-bona")) {
         hints.saidAlgoTinc = true;
       }

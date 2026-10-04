@@ -39,6 +39,11 @@ export interface BotHints {
    * Activa la regla de la 1a baza (`applyPartnerATuFirstBaza`).
    */
   partnerSaidATu?: boolean;
+  /**
+   * Rivals que en aquesta ronda han dit "Vine a mi!", "Algo tinc" o
+   * "Vine a vore!" (senyes de força). Activa `applyProtect3VsRivalSignals`.
+   */
+  rivalStrengthSignalers?: PlayerId[];
 }
 
 /** Carta TOP del Truc: As d'espases, As de bastos, 7 d'espases, 7 d'oros. */
@@ -1350,6 +1355,48 @@ function applyPartnerATuFirstBaza(
   return act ?? decision;
 }
 
+/**
+ * Protecció del 3 davant senyes rivals (1a baza): si algun rival que encara
+ * ha de tirar ha dit "Vine a mi!", "Algo tinc" o "Vine a vore!", i la carta
+ * més alta del bot és un 3 (cap Top), NO tira el 3 (seria un desperdici):
+ * el guarda i juga la següent carta de major valor que no siga un 3
+ * (un 7 que no siga d'oros/espases, o si no un 6, etc.).
+ */
+function applyProtect3VsRivalSignals(
+  m: MatchState,
+  player: PlayerId,
+  hints: BotHints,
+  decision: Action,
+): Action {
+  const signalers = hints.rivalStrengthSignalers;
+  if (!signalers || signalers.length === 0 || decision.type !== "play-card") return decision;
+  const r = m.round;
+  if (r.phase !== "playing" || r.tricks.length !== 1 || r.turn !== player) return decision;
+  const trick = r.tricks[0];
+  if (!trick || trick.cards.some((tc) => tc.player === player)) return decision;
+  const myTeam = teamOf(player);
+  const played = new Set(trick.cards.map((tc) => tc.player));
+  const rivalNext = signalers.some(
+    (p) => teamOf(p) !== myTeam && !played.has(p),
+  );
+  if (!rivalNext) return decision;
+  const hand = (r.hands[player] ?? []).filter(isRealCard);
+  if (hand.length === 0) return decision;
+  // Cap Top i la carta més alta ha de ser un 3.
+  if (hand.some(isTopCard)) return decision;
+  const maxStrength = Math.max(...hand.map(cardStrength));
+  if (maxStrength !== 70) return decision;
+  const nonThrees = hand
+    .filter((c) => c.rank !== 3)
+    .sort((a, b) => cardStrength(b) - cardStrength(a));
+  const chosen = nonThrees[0];
+  if (!chosen) return decision;
+  const act = legalActions(m, player).find(
+    (a) => a.type === "play-card" && a.cardId === chosen.id && !a.covered,
+  );
+  return act ?? decision;
+}
+
 export function botDecide(
   m: MatchState,
   player: PlayerId,
@@ -1364,7 +1411,8 @@ export function botDecide(
   // sobre "guardar la TOP" (vegeu `applyPardaClosesHand`).
   const parda = applyPardaClosesHand(m, player, decision);
   const aTu = applyPartnerATuFirstBaza(m, player, hints, parda);
-  return applyAlgoTincFirstBaza(m, player, hints, aTu);
+  const algo = applyAlgoTincFirstBaza(m, player, hints, aTu);
+  return applyProtect3VsRivalSignals(m, player, hints, algo);
 }
 
 function botDecideCore(
