@@ -34,6 +34,11 @@ export interface BotHints {
    * (`applyAlgoTincFirstBaza`).
    */
   saidAlgoTinc?: boolean;
+  /**
+   * El company del bot ha dit "A tu!" en aquesta ronda: cedeix la iniciativa.
+   * Activa la regla de la 1a baza (`applyPartnerATuFirstBaza`).
+   */
+  partnerSaidATu?: boolean;
 }
 
 /** Carta TOP del Truc: As d'espases, As de bastos, 7 d'espases, 7 d'oros. */
@@ -1306,6 +1311,45 @@ function applyAlgoTincFirstBaza(
   return act ?? decision;
 }
 
+/**
+ * Regla "A tu!" del company (1a baza): si el company ha dit "A tu!" (cedeix
+ * la iniciativa), el bot NO ha de tirar carta baixa: prioritza una Top
+ * (la més fluixa que supere les rivals; si cap les supera, la més fluixa);
+ * si no en té, un 3; i només si no té ni Top ni 3, tira la més baixa.
+ * La posició es dedueix de les cartes ja jugades a la baza en curs.
+ */
+function applyPartnerATuFirstBaza(
+  m: MatchState,
+  player: PlayerId,
+  hints: BotHints,
+  decision: Action,
+): Action {
+  if (!hints.partnerSaidATu || decision.type !== "play-card") return decision;
+  const r = m.round;
+  if (r.phase !== "playing" || r.tricks.length !== 1 || r.turn !== player) return decision;
+  const trick = r.tricks[0];
+  if (!trick || trick.cards.some((tc) => tc.player === player)) return decision;
+  const myTeam = teamOf(player);
+  const rivalMax = trick.cards
+    .filter((tc) => !tc.covered && teamOf(tc.player) !== myTeam)
+    .reduce((mx, tc) => Math.max(mx, cardStrength(tc.card)), -1);
+  const hand = (r.hands[player] ?? []).filter(isRealCard);
+  if (hand.length === 0) return decision;
+  const byStrength = (a: Card, b: Card) => cardStrength(a) - cardStrength(b);
+  const tops = hand.filter(isTopCard).sort(byStrength);
+  const threes = hand.filter((c) => c.rank === 3).sort(byStrength);
+  const chosen =
+    tops.find((c) => cardStrength(c) > rivalMax) ??
+    tops[0] ??
+    threes[0] ??
+    [...hand].sort(byStrength)[0];
+  if (!chosen) return decision;
+  const act = legalActions(m, player).find(
+    (a) => a.type === "play-card" && a.cardId === chosen.id && !a.covered,
+  );
+  return act ?? decision;
+}
+
 export function botDecide(
   m: MatchState,
   player: PlayerId,
@@ -1319,7 +1363,8 @@ export function botDecide(
   // La parda que tanca la mà té prioritat sobre qualsevol descart baix o
   // sobre "guardar la TOP" (vegeu `applyPardaClosesHand`).
   const parda = applyPardaClosesHand(m, player, decision);
-  return applyAlgoTincFirstBaza(m, player, hints, parda);
+  const aTu = applyPartnerATuFirstBaza(m, player, hints, parda);
+  return applyAlgoTincFirstBaza(m, player, hints, aTu);
 }
 
 function botDecideCore(
