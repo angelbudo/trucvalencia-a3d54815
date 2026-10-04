@@ -1663,7 +1663,6 @@ export function useTrucMatch(options: UseTrucMatchOptions = {}) {
         }
         if (phrases.includes("vine-a-mi") || phrases.includes("tinc-bona")) {
           rivalSignaled = true;
-          break;
         }
       }
       if (rivalSignaled) hints.rivalShownStrength = true;
