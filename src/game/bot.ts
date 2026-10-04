@@ -2296,18 +2296,18 @@ function botDecideInner(
   // Peu amb envit (≥31): envida sí o sí, sense consultar ni esperar.
   // Aquesta excepció es manté fins i tot si és el primer del equip a tirar:
   // tindre 31+ d'envit és una jugada segura que no depèn de l'ordre.
-  if (canEnvit && !isMano && myEnvit >= 31 && firstOfTeamFirstTrickAllowsCall) {
+  if (conservativeCanEnvit && !isMano && myEnvit >= 31 && firstOfTeamFirstTrickAllowsCall) {
     return { type: "shout", what: "envit" };
   }
   // Mode honest (bluffRate === 0): només envida si realment té possibilitats
   // reals de guanyar l'envit (≥31). Si la mà és, envida; si és peu ja s'ha
   // tractat més amunt. Sense farols ni envits especulatius amb 27/30.
   // En mode honest la mà MAI envida proactivament (`envitAllowedForRole`).
-  if (canEnvit && envitAllowedForRole && envitAllowedByPosition && firstOfTeamFirstTrickAllowsCall && bluffRate === 0) {
+  if (conservativeCanEnvit && envitAllowedForRole && envitAllowedByPosition && firstOfTeamFirstTrickAllowsCall && bluffRate === 0) {
     if (myEnvit >= 31) return { type: "shout", what: "envit" };
     // No fer cap altre envit en mode sincer.
   } else
-  if (canEnvit && envitAllowedForRole && envitAllowedByPosition && firstOfTeamFirstTrickAllowsCall && !trapEnvit) {
+  if (conservativeCanEnvit && envitAllowedForRole && envitAllowedByPosition && firstOfTeamFirstTrickAllowsCall && !trapEnvit) {
     if (myEnvit >= 30 && Math.random() < 0.8 * tuning.callPropensity) {
       return { type: "shout", what: "envit" };
     }
@@ -2321,7 +2321,7 @@ function botDecideInner(
   }
   // Amb trampa activa, de tant en tant igualment envida (per no ser previsible).
   // En mode sincer no s'aplica aquesta aleatorietat.
-  if (canEnvit && envitAllowedForRole && envitAllowedByPosition && firstOfTeamFirstTrickAllowsCall && trapEnvit && bluffRate > 0 && Math.random() < 0.12) {
+  if (conservativeCanEnvit && envitAllowedForRole && envitAllowedByPosition && firstOfTeamFirstTrickAllowsCall && trapEnvit && bluffRate > 0 && Math.random() < 0.12) {
     return { type: "shout", what: "envit" };
   }
 
@@ -2517,6 +2517,16 @@ function decideEnvitResponse(
       `trucStrength=${trucStrength.toFixed(2)} trucBonus=${trucBonus.toFixed(2)}`
     );
   };
+
+  // ----- Perfil CONSERVADOR amb envit baix (≤30): mai acceptar -----
+  // Regla estricta SENSE excepcions: davant d'un envit rival (envit,
+  // renvit o falta-envit), amb 30 punts d'envit o menys el bot
+  // conservador respon sempre "no-vull", independentment de la seua
+  // posició a la taula o dels punts en joc.
+  if (tuning.conservativeMode && myEnvit <= 30) {
+    log("no-vull (conservador ≤30, sense excepcions)");
+    return { type: "shout", what: "no-vull" };
+  }
 
   // ----- Resposta a FALTA-ENVIT -----
   // Regla específica del jugador: davant d'una falta-envit, el bot només
