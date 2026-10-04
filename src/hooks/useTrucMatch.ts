@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePausableTimers } from "@/components/truc/usePausableTimers";
 import { Action, MatchState, PlayerId, ShoutKind, partnerOf, nextPlayer, teamOf } from "@/game/types";
 import { applyAction, createMatch, dealRound, isCamaMatchPoint, legalActions, startNextRound } from "@/game/engine";
-import { botDecide } from "@/game/bot";
+import { botDecide, conservativeMayCallEnvit } from "@/game/bot";
 import { bestEnvit, playerTotalEnvit, cardStrength, asEspasesPlayedFirstTrick } from "@/game/deck";
 import { computeShoutDisplay } from "@/game/shoutDisplay";
 import { useShoutFlashes } from "@/game/useShoutFlash";
@@ -1531,7 +1531,10 @@ export function useTrucMatch(options: UseTrucMatchOptions = {}) {
         const partnerSeatTE = partnerOf(botPlayer);
         const partnerIsBotTE = partnerSeatTE !== HUMAN;
 
-        if (myEnvitNow >= 30) {
+        if (
+          myEnvitNow >= 30 &&
+          conservativeMayCallEnvit(r, botPlayer, tuningRef.current.conservativeMode === true, false)
+        ) {
           // Fast-path: envida directament sense consultar.
           consultStartedRef.current.add(trucEnvitConsultKey);
           consultAdviceRef.current.set(trucEnvitConsultKey, "neutral");
@@ -1558,8 +1561,8 @@ export function useTrucMatch(options: UseTrucMatchOptions = {}) {
             if (
               envitAct &&
               (instruction === "envida" ||
-                instruction === "si" ||
-                instruction === "si-tinc-n")
+                ((instruction === "si" || instruction === "si-tinc-n") &&
+                  conservativeMayCallEnvit(matchRef.current.round, botPlayer, tuningRef.current.conservativeMode === true, false)))
             ) {
               dispatch(botPlayer, envitAct);
               return;
@@ -1762,10 +1765,8 @@ export function useTrucMatch(options: UseTrucMatchOptions = {}) {
     // Perfil CONSERVADOR: el bot que canta (actor) amb ≤30 d'envit només
     // pot cantar l'envit ordenat si és l'últim a parlar de la 1a baza
     // (3 cartes a la taula); altrament no canta (regla ≤30).
-    const conservativeActorCanEnvit =
-      !tuningRef.current.conservativeMode ||
-      playerTotalEnvit(r, botPlayer) > 30 ||
-      (r.tricks[r.tricks.length - 1]?.cards.length ?? 0) === 3;
+    // (L'ordre explícita del company és sempre obeïda, també pel conservador.)
+    const conservativeActorCanEnvit = true;
     if (
       isPlayCardTurn &&
       r.tricks.length === 1 &&
@@ -1882,9 +1883,15 @@ export function useTrucMatch(options: UseTrucMatchOptions = {}) {
               ?? acts.find((a) => a.type === "shout" && a.what === "envit")
               ?? null;
           } else if (canEnvitEarly && (earlyHit === "si" || earlyHit === "si-tinc-n")) {
-            action = { type: "shout", what: "envit" };
+            if (conservativeMayCallEnvit(r, botPlayer, tuningRef.current.conservativeMode === true, false)) {
+              action = { type: "shout", what: "envit" };
+            }
           } else if (canEnvitEarly && earlyHit === "no") {
-            if (myEnvitEarly >= 30 && Math.random() < 0.4) {
+            if (
+              myEnvitEarly >= 30 &&
+              conservativeMayCallEnvit(r, botPlayer, tuningRef.current.conservativeMode === true, false) &&
+              Math.random() < 0.4
+            ) {
               action = { type: "shout", what: "envit" };
             }
           }
@@ -1911,7 +1918,11 @@ export function useTrucMatch(options: UseTrucMatchOptions = {}) {
       const canEnvit = legalActions(match, botPlayer).some(
         (a) => a.type === "shout" && a.what === "envit",
       );
-      if (canEnvit && myEnvit >= 30) {
+      if (
+        canEnvit &&
+        myEnvit >= 30 &&
+        conservativeMayCallEnvit(r, botPlayer, tuningRef.current.conservativeMode === true, false)
+      ) {
         timerRef.current = window.setTimeout(() => {
           dispatch(botPlayer, { type: "shout", what: "envit" });
         }, BOT_DELAY_MS) as unknown as number;
@@ -1938,7 +1949,8 @@ export function useTrucMatch(options: UseTrucMatchOptions = {}) {
         }
         if (canEnvit && (instruction === "si" || instruction === "no" || instruction === "si-tinc-n")) {
           const partnerHasEnvit = instruction !== "no";
-          if (partnerHasEnvit) {
+          const consOk = conservativeMayCallEnvit(r, botPlayer, tuningRef.current.conservativeMode === true, false);
+          if (partnerHasEnvit && consOk) {
             // Si el company ha confirmat que té envit ("Sí" o "Tinc {n}"),
             // el peu-bot envida directament. És el comportament natural:
             // ja s'ha preguntat al primer de la pareja, ha dit que sí, i
@@ -1948,7 +1960,7 @@ export function useTrucMatch(options: UseTrucMatchOptions = {}) {
             // El company no té envit. Només envida si jo en tinc molt
             // (≥30: 30, 31, 32 o 33). Amb 28-29 o menys és un envit
             // petit i no val la pena demanar al company que envide.
-            if (myEnvit >= 30 && Math.random() < 0.4) return { type: "shout", what: "envit" };
+            if (consOk && myEnvit >= 30 && Math.random() < 0.4) return { type: "shout", what: "envit" };
           }
           // No envidar: el peu-bot tira carta com sempre.
           const hints = buildHints();
