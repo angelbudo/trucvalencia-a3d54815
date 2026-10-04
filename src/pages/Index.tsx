@@ -78,7 +78,7 @@ const Index = () => {
       {(isAdmin || isModerator) && (
         <button
           type="button"
-          onClick={() => navigate({ to: "/admin/moderacio" })}
+          onClick={() => navigate({ to: "/admin/moderacio" as "/$" })}
           className="relative flex items-center justify-center w-10 h-10 rounded-full bg-gradient-to-br from-amber-500 to-yellow-600 border border-amber-300 text-white shadow-lg shadow-amber-500/20 hover:scale-105 active:scale-95 transition-all duration-200"
           title={isAdmin ? "Panell d'Administrador" : "Panell de Moderació"}
         >
