@@ -39,6 +39,10 @@ export interface BotHints {
    * Activa la regla de la 1a baza (`applyPartnerATuFirstBaza`).
    */
   partnerSaidATu?: boolean;
+  /** El company ha ordenat envidar: "Envida!" o "Sí" a "Vols que envide?". */
+  partnerOrderedEnvit?: boolean;
+  /** El company ha anunciat "Tinc N" amb N ≥ 30. */
+  partnerTincN30?: boolean;
   /**
    * Rivals que en aquesta ronda han dit "Vine a mi!", "Algo tinc" o
    * "Vine a vore!" (senyes de força). Activa `applyProtect3VsRivalSignals`.
@@ -1440,13 +1444,24 @@ function botDecideCore(
       rExc.envitState.kind === "none" &&
       rExc.trucState.kind !== "pending" &&
       (rExc.tricks[rExc.tricks.length - 1]?.cards.length ?? 0) === 3;
-    if (
-      tuning.conservativeMode &&
-      playerTotalEnvit(rExc, player) <= 30 &&
-      excEnvitAvailable &&
-      excLastSpeaker
-    ) {
-      return { type: "shout", what: "envit" };
+    // Regles completes del perfil CONSERVADOR (1a baza, cap envit cantat):
+    //  · 31-33 → envida sempre per iniciativa pròpia.
+    //  · 30    → només amb ordre/autorització del company ("Envida!",
+    //            "Sí" a "Vols que envide?", "Tinc N" amb N ≥ 30) o sent
+    //            el 4t en parlar (3 cartes a la taula).
+    //  · <30   → només amb ordre explícita del company.
+    const excFirstTrickOpen =
+      rExc.tricks.length === 1 &&
+      rExc.envitState.kind === "none" &&
+      rExc.trucState.kind !== "pending";
+    if (tuning.conservativeMode && excEnvitAvailable && excFirstTrickOpen) {
+      const myEnv = playerTotalEnvit(rExc, player);
+      const ordered = !!hints?.partnerOrderedEnvit || !!hints?.forceEnvit;
+      if (myEnv >= 31) return { type: "shout", what: "envit" };
+      if (myEnv === 30 && (ordered || !!hints?.partnerTincN30 || excLastSpeaker)) {
+        return { type: "shout", what: "envit" };
+      }
+      if (myEnv < 30 && ordered) return { type: "shout", what: "envit" };
     }
   }
 
@@ -2396,8 +2411,12 @@ function botDecideInner(
     r.tricks.length === 1 &&
     r.envitState.kind === "none" &&
     (r.tricks[r.tricks.length - 1]?.cards.length ?? 0) === 3;
+  const conservativeOrdered = !!hints.partnerOrderedEnvit;
   const conservativeCanEnvit =
-    canEnvit && (!conservativeEnvitBlocked || conservativeEnvitLastSpeak);
+    canEnvit &&
+    (!conservativeEnvitBlocked ||
+      conservativeOrdered ||
+      (myEnvit === 30 && (conservativeEnvitLastSpeak || !!hints.partnerTincN30)));
   // Estratègia: la MÀ (primer jugador de la pareja) NO envida proactivament.
   // En lloc d'envidar i encadenar truc (combo "Envit + Truc" que sol donar
   // pocs punts perquè el rival pot rebutjar el truc i quedar-se l'envit
