@@ -88,10 +88,29 @@ interface UseTrucMatchOptions {
 
 const SAVE_KEY = "truc:save:v2";
 
+/** Context de la ronda que no viu al `MatchState` (senyes de xat,
+ *  intencions del company, compromisos...). Es persisteix junt amb la
+ *  partida perquè, en pausar/reprendre o recarregar, els bots
+ *  conserven exactament la mateixa informació per a decidir. */
+interface SavedRoundContext {
+  historyLen: number;
+  chatSignals: Record<PlayerId, ChatPhraseId[]>;
+  selfCommit: Record<PlayerId, Record<number, "vine-a-vore" | "vine-al-meu-tres" | "tinc-un-tres">>;
+  intents: PartnerIntents;
+  pendingChainedTruc: Record<PlayerId, boolean>;
+  proactiveEnvitInstruction: string[];
+  completedMandatorySecondWaits: string[];
+  peuSpontaneousInfo: string[];
+  consultAdvice: Array<[string, PartnerAdvice]>;
+  lastSeenTrickIdx: number;
+  lastPhraseByPlayer: Array<[PlayerId, string]>;
+}
+
 interface SavedMatch {
   match: MatchState;
   targetCames: number;
   initialMano: PlayerId;
+  ctx?: SavedRoundContext;
 }
 
 function loadSavedMatch(): SavedMatch | null {
@@ -217,6 +236,24 @@ export function useTrucMatch(options: UseTrucMatchOptions = {}) {
   useEffect(() => { onRoundEndRef.current = options.onRoundEnd; }, [options.onRoundEnd]);
   const pausedRef = useRef<boolean>(options.paused ?? false);
   useEffect(() => { pausedRef.current = options.paused ?? false; }, [options.paused]);
+  const snapshotRoundContextRef = useRef<((historyLen: number) => SavedRoundContext) | null>(null);
+  // Represa: cap bot pot actuar instantàniament en llevar la pausa. Tot
+  // timer de bot programat just després de reprendre espera com a mínim
+  // RESUME_MIN_THINK_MS (a més del seu retard complet, que es reprograma
+  // des de zero perquè els timers vells es cancel·len en pausar).
+  const RESUME_MIN_THINK_MS = 1500;
+  const resumeGraceUntilRef = useRef<number>(0);
+  const wasUserPausedRef = useRef<boolean>(options.userPaused ?? false);
+  useEffect(() => {
+    if (wasUserPausedRef.current && !options.userPaused) {
+      resumeGraceUntilRef.current = Date.now() + RESUME_MIN_THINK_MS;
+    }
+    wasUserPausedRef.current = options.userPaused ?? false;
+  }, [options.userPaused]);
+  const setBotTimeout = (fn: () => void, ms: number): number => {
+    const grace = Math.max(0, resumeGraceUntilRef.current - Date.now());
+    return window.setTimeout(fn, Math.max(ms, grace)) as unknown as number;
+  };
 
   // Guard anti-race: quan acaba una mà (history creix), el pare necessita
   // un parell de cicles de render per a flipar `paused` (animLock) ja que
@@ -363,6 +400,7 @@ export function useTrucMatch(options: UseTrucMatchOptions = {}) {
           match,
           targetCames: initialTargetCames,
           initialMano: (options.initialMano ?? 0) as PlayerId,
+          ctx: snapshotRoundContextRef.current?.(match.history.length),
         };
         window.localStorage.setItem(SAVE_KEY, JSON.stringify(payload));
       }
@@ -506,6 +544,88 @@ export function useTrucMatch(options: UseTrucMatchOptions = {}) {
     pendingChainedTrucRef.current = { 0: false, 1: false, 2: false, 3: false };
   }, []);
 
+  // ---------------------------------------------------------------------------
+  // SNAPSHOT / RESTAURACIÓ del context de ronda (pausa, minimitzar, recarregar).
+  // El `MatchState` (bazas, cartes en mesa i ordre, torn, cants pendents,
+  // mans, marcador) ja es persisteix sencer; ací afegim tot el que viu en
+  // refs perquè `botDecide` reba exactament la mateixa entrada.
+  // ---------------------------------------------------------------------------
+  const snapshotRoundContext = (historyLen: number): SavedRoundContext => ({
+    historyLen,
+    chatSignals: {
+      0: [...(chatSignalsRef.current[0] ?? [])],
+      1: [...(chatSignalsRef.current[1] ?? [])],
+      2: [...(chatSignalsRef.current[2] ?? [])],
+      3: [...(chatSignalsRef.current[3] ?? [])],
+    },
+    selfCommit: JSON.parse(JSON.stringify(selfCommitRef.current)),
+    intents: JSON.parse(JSON.stringify(intentsRef.current)),
+    pendingChainedTruc: { ...pendingChainedTrucRef.current },
+    proactiveEnvitInstruction: [...proactiveEnvitInstructionRef.current],
+    completedMandatorySecondWaits: [...completedMandatorySecondWaitsRef.current],
+    peuSpontaneousInfo: [...peuSpontaneousInfoRef.current],
+    consultAdvice: [...consultAdviceRef.current.entries()],
+    lastSeenTrickIdx: lastSeenTrickIdxRef.current,
+    lastPhraseByPlayer: [...lastPhraseByPlayerRef.current.entries()],
+  });
+  snapshotRoundContextRef.current = snapshotRoundContext;
+
+  // Restauració única en muntar quan es reprén una partida guardada.
+  const ctxRestoredRef = useRef(false);
+  if (!ctxRestoredRef.current) {
+    ctxRestoredRef.current = true;
+    if (options.resume) {
+      const saved = loadSavedMatch();
+      const ctx = saved?.ctx;
+      if (ctx && ctx.historyLen === match.history.length) {
+        chatSignalsRef.current = ctx.chatSignals;
+        selfCommitRef.current = ctx.selfCommit;
+        intentsRef.current = { ...emptyIntents(), ...ctx.intents };
+        pendingChainedTrucRef.current = ctx.pendingChainedTruc;
+        proactiveEnvitInstructionRef.current = new Set(ctx.proactiveEnvitInstruction);
+        completedMandatorySecondWaitsRef.current = new Set(ctx.completedMandatorySecondWaits);
+        peuSpontaneousInfoRef.current = new Set(ctx.peuSpontaneousInfo);
+        consultAdviceRef.current = new Map(ctx.consultAdvice);
+        lastSeenTrickIdxRef.current = ctx.lastSeenTrickIdx;
+        lastPhraseByPlayerRef.current = new Map(ctx.lastPhraseByPlayer);
+      }
+    }
+  }
+
+  // Desa el snapshot complet en pausar, en amagar la pestanya i en desmuntar.
+  const persistSnapshot = () => {
+    if (typeof window === "undefined") return;
+    const m = matchRef.current ?? match;
+    if (!m || m.round.phase === "game-end") return;
+    try {
+      const payload: SavedMatch = {
+        match: m,
+        targetCames: initialTargetCames,
+        initialMano: (options.initialMano ?? 0) as PlayerId,
+        ctx: snapshotRoundContext(m.history.length),
+      };
+      window.localStorage.setItem(SAVE_KEY, JSON.stringify(payload));
+    } catch { /* noop */ }
+  };
+  const persistSnapshotRef = useRef(persistSnapshot);
+  persistSnapshotRef.current = persistSnapshot;
+  useEffect(() => {
+    if (options.userPaused) persistSnapshotRef.current();
+  }, [options.userPaused]);
+  useEffect(() => {
+    const onHide = () => {
+      if (document.visibilityState === "hidden") persistSnapshotRef.current();
+    };
+    const onPageHide = () => persistSnapshotRef.current();
+    document.addEventListener("visibilitychange", onHide);
+    window.addEventListener("pagehide", onPageHide);
+    return () => {
+      document.removeEventListener("visibilitychange", onHide);
+      window.removeEventListener("pagehide", onPageHide);
+      persistSnapshotRef.current();
+    };
+  }, []);
+
   /** Comprova si el jugador `p` és el primer de la seua parella en
    *  l'ordre de tirada partint de la mà actual. */
   const isFirstOfPair = useCallback((p: PlayerId, mano: PlayerId): boolean => {
@@ -539,6 +659,8 @@ export function useTrucMatch(options: UseTrucMatchOptions = {}) {
   }, []);
 
   const scheduleConsultTimer = useCallback((fn: () => void, delayMs: number) => {
+    const grace = Math.max(0, resumeGraceUntilRef.current - Date.now());
+    delayMs = Math.max(delayMs, grace);
     const id = window.setTimeout(() => {
       consultTimersRef.current = consultTimersRef.current.filter((t) => t !== id);
       fn();
@@ -827,7 +949,7 @@ export function useTrucMatch(options: UseTrucMatchOptions = {}) {
       responseFlashUntilRef.current > Date.now()
     ) {
       const waitMs = responseFlashRemainingMs() + 80;
-      timerRef.current = window.setTimeout(() => {
+      timerRef.current = setBotTimeout(() => {
         if (isEngineLocked()) return;
         const current = matchRef.current;
         const stillLegal = legalActions(current, player).some((a) =>
@@ -1812,7 +1934,7 @@ export function useTrucMatch(options: UseTrucMatchOptions = {}) {
     ) {
       consultStartedRef.current.add(consultKey);
       consultAdviceRef.current.set(consultKey, "weak");
-      timerRef.current = window.setTimeout(() => {
+      timerRef.current = setBotTimeout(() => {
         const hints = buildHints();
         const action = botDecide(match, botPlayer, "weak", hints, tuningRef.current, bluffRateRef.current);
         if (action) dispatch(botPlayer, action);
@@ -1893,7 +2015,7 @@ export function useTrucMatch(options: UseTrucMatchOptions = {}) {
             action = botDecide(match, botPlayer, cachedAdvice, hints, tuningRef.current, bluffRateRef.current);
           }
           if (action) {
-            timerRef.current = window.setTimeout(() => {
+            timerRef.current = setBotTimeout(() => {
               if (action) dispatch(botPlayer, action);
             }, BOT_DELAY_MS) as unknown as number;
           }
@@ -1912,7 +2034,7 @@ export function useTrucMatch(options: UseTrucMatchOptions = {}) {
         (a) => a.type === "shout" && a.what === "envit",
       );
       if (canEnvit && myEnvit >= 30) {
-        timerRef.current = window.setTimeout(() => {
+        timerRef.current = setBotTimeout(() => {
           dispatch(botPlayer, { type: "shout", what: "envit" });
         }, BOT_DELAY_MS) as unknown as number;
         return () => {
@@ -2137,7 +2259,7 @@ export function useTrucMatch(options: UseTrucMatchOptions = {}) {
     ) {
       consultStartedRef.current.add(consultKey);
       consultAdviceRef.current.set(consultKey, "weak");
-      timerRef.current = window.setTimeout(() => {
+      timerRef.current = setBotTimeout(() => {
         const hints = buildHints();
         const action = botDecide(match, botPlayer, "weak", hints, tuningRef.current, bluffRateRef.current);
         if (action) dispatch(botPlayer, action);
@@ -2222,7 +2344,7 @@ export function useTrucMatch(options: UseTrucMatchOptions = {}) {
         const advice = adviceFromAnswer(lastInfo);
         consultStartedRef.current.add(consultKey);
         consultAdviceRef.current.set(consultKey, advice);
-        timerRef.current = window.setTimeout(() => {
+        timerRef.current = setBotTimeout(() => {
           const hints = buildHints();
           const action = botDecide(match, botPlayer, advice, hints, tuningRef.current, bluffRateRef.current);
           if (hints.foldTruc && action?.type === "shout" && action.what === "no-vull") {
@@ -2487,7 +2609,7 @@ export function useTrucMatch(options: UseTrucMatchOptions = {}) {
       return;
     }
 
-    timerRef.current = window.setTimeout(() => {
+    timerRef.current = setBotTimeout(() => {
       const hints = buildHints();
       const action = botDecide(match, botPlayer, cachedAdvice, hints, tuningRef.current, bluffRateRef.current);
       if (hints.foldTruc && action?.type === "shout" && action.what === "no-vull") {
