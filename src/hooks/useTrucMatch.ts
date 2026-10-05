@@ -1764,6 +1764,8 @@ export function useTrucMatch(options: UseTrucMatchOptions = {}) {
         rivalShownStrength?: boolean;
         saidAlgoTinc?: boolean;
         partnerSaidATu?: boolean;
+        partnerOrderedEnvit?: boolean;
+        partnerTincN30?: boolean;
         rivalStrengthSignalers?: PlayerId[];
       } = {};
       // Mode sincer: detecta si algun rival d'aquest bot ha dit
@@ -1796,6 +1798,18 @@ export function useTrucMatch(options: UseTrucMatchOptions = {}) {
       }
       if (chatSignalsRef.current[partnerOf(botPlayer)]?.includes("a-tu")) {
         hints.partnerSaidATu = true;
+      }
+      {
+        const pSig = chatSignalsRef.current[partnerOf(botPlayer)] ?? [];
+        const mySig = chatSignalsRef.current[botPlayer] ?? [];
+        if (pSig.includes("envida") || (mySig.includes("vols-envide") && pSig.includes("si"))) {
+          hints.partnerOrderedEnvit = true;
+        }
+        // "Tinc N" sempre diu el valor real (humà i bots), així que N és
+        // l'envit real del company.
+        if (pSig.includes("si-tinc-n") && playerTotalEnvit(match.round, partnerOf(botPlayer)) >= 30) {
+          hints.partnerTincN30 = true;
+        }
       }
 
       // Compromís personal del propi bot: si en aquesta baza ha respost
@@ -1884,10 +1898,9 @@ export function useTrucMatch(options: UseTrucMatchOptions = {}) {
     // Perfil CONSERVADOR: el bot que canta (actor) amb ≤30 d'envit només
     // pot cantar l'envit ordenat si és l'últim a parlar de la 1a baza
     // (3 cartes a la taula); altrament no canta (regla ≤30).
-    const conservativeActorCanEnvit =
-      !tuningRef.current.conservativeMode ||
-      playerTotalEnvit(r, botPlayer) > 30 ||
-      (r.tricks[r.tricks.length - 1]?.cards.length ?? 0) === 3;
+    // Ací el company li ORDENA "Envida!": l'ordre autoritza el
+    // conservador a cantar amb qualsevol puntuació.
+    const conservativeActorCanEnvit = true;
     if (
       isPlayCardTurn &&
       r.tricks.length === 1 &&
