@@ -1390,11 +1390,45 @@ function applyProtect3VsRivalSignals(
   if (hand.some(isTopCard)) return decision;
   const maxStrength = Math.max(...hand.map(cardStrength));
   if (maxStrength !== 70) return decision;
+  const threesInHand = hand.filter((c) => c.rank === 3);
+  // Excepció: amb 2 (o més) tresos, en queda un altre → pot tirar un 3
+  // lliurement; es manté la decisió ja presa.
+  if (threesInHand.length >= 2) return decision;
   const nonThrees = hand
     .filter((c) => c.rank !== 3)
     .sort((a, b) => cardStrength(b) - cardStrength(a));
   const chosen = nonThrees[0];
   if (!chosen) return decision;
+
+  // Si algun rival JA ha tirat carta (descoberta) a la baza en curs, només
+  // es guarda el 3 si l'alternativa és suficient per EMPARDAR o SUPERAR la
+  // carta rival i té qualitat mínima (6, o 7 de copes/bastos). Si no, el bot
+  // ha d'usar el 3 per guanyar la baza (prohibit regalar-la).
+  const rivalCards = trick.cards.filter(
+    (tc) => !tc.covered && teamOf(tc.player) !== myTeam,
+  );
+  if (rivalCards.length > 0) {
+    const rivalMax = rivalCards.reduce(
+      (mx, tc) => Math.max(mx, cardStrength(tc.card)),
+      -1,
+    );
+    const altStrength = cardStrength(chosen);
+    // 6 = 50, 7 no-Top (copes/bastos) = 60. Cap Top en mà (ja filtrat).
+    const altQualifies = altStrength >= 50;
+    if (!(altQualifies && altStrength >= rivalMax)) {
+      const three = threesInHand[0]!;
+      if (cardStrength(three) > rivalMax) {
+        const winAct = legalActions(m, player).find(
+          (a) => a.type === "play-card" && a.cardId === three.id && !a.covered,
+        );
+        return winAct ?? decision;
+      }
+      // Ni el 3 pot guanyar: no té sentit gastar-lo ni protegir; es manté
+      // la decisió defensiva habitual.
+      return decision;
+    }
+  }
+
   const act = legalActions(m, player).find(
     (a) => a.type === "play-card" && a.cardId === chosen.id && !a.covered,
   );
