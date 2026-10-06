@@ -1435,6 +1435,65 @@ function applyProtect3VsRivalSignals(
   return act ?? decision;
 }
 
+/**
+ * Regla "dues TOPs + un 3, sense As d'espases" (1a baza): si la mà del bot
+ * conté alhora…
+ *   · almenys DUES cartes TOP (As de bastos, 7 d'espases o 7 d'oros),
+ *   · un 3, i
+ *   · NO l'As d'espases (la carta més alta del joc),
+ * llavors està PROHIBIT tirar el 3 a la 1a baza: el bot juga la seua TOP més
+ * alta (As de bastos, o 7 d'espases, o 7 d'oros) per a amarrar la baza
+ * inicial i evitar que el rival se la porte de manera barata amb un 3 o amb
+ * la pròpia espasa. Si la millor carta de la mesa la porta el company (i és
+ * 3 o TOP) no el pisquem: es manté la decisió ja presa.
+ *
+ * Les demés regles de protecció del 3 (`applyProtect3VsRivalSignals`) es
+ * conserven intactes per a qualsevol altra combinació de cartes.
+ */
+function applyTwoTopsHold3FirstBaza(
+  m: MatchState,
+  player: PlayerId,
+  decision: Action,
+): Action {
+  if (decision.type !== "play-card" || decision.covered) return decision;
+  const r = m.round;
+  if (r.phase !== "playing" || r.tricks.length !== 1 || r.turn !== player) return decision;
+  const trick = r.tricks[0];
+  if (!trick || trick.cards.some((tc) => tc.player === player)) return decision;
+  const myTeam = teamOf(player);
+
+  const hand = (r.hands[player] ?? []).filter(isRealCard);
+  const tops = hand.filter(isTopCard);
+  // Calen EXACTAMENT esta combinació: 2 TOPs + un 3, i cap As d'espases.
+  if (tops.length < 2) return decision;
+  if (hand.some((c) => c.rank === 1 && c.suit === "espases")) return decision;
+  if (!hand.some((c) => c.rank === 3)) return decision;
+
+  // No pisquem el company: si la seua carta ja guanya la baza i és 3 o TOP,
+  // no gastem la TOP més alta damunt seu.
+  const open = trick.cards.filter((tc) => !tc.covered);
+  const bestStrength = open.reduce(
+    (mx, tc) => Math.max(mx, cardStrength(tc.card)),
+    -1,
+  );
+  const partnerHoldsBest = open.some(
+    (tc) =>
+      teamOf(tc.player) === myTeam &&
+      tc.player !== player &&
+      cardStrength(tc.card) === bestStrength &&
+      (tc.card.rank === 3 || isTopCard(tc.card)),
+  );
+  if (partnerHoldsBest) return decision;
+
+  // TOP més alta de la mà (As de bastos > 7 d'espases > 7 d'oros).
+  const highest = [...tops].sort((a, b) => cardStrength(b) - cardStrength(a))[0];
+  if (!highest) return decision;
+  const act = legalActions(m, player).find(
+    (a) => a.type === "play-card" && a.cardId === highest.id && !a.covered,
+  );
+  return act ?? decision;
+}
+
 export function botDecide(
   m: MatchState,
   player: PlayerId,
@@ -1450,7 +1509,10 @@ export function botDecide(
   const parda = applyPardaClosesHand(m, player, decision);
   const aTu = applyPartnerATuFirstBaza(m, player, hints, parda);
   const algo = applyAlgoTincFirstBaza(m, player, hints, aTu);
-  return applyProtect3VsRivalSignals(m, player, hints, algo);
+  const protect = applyProtect3VsRivalSignals(m, player, hints, algo);
+  // "Dues TOPs + un 3, sense As d'espases" és l'última paraula de la 1a baza:
+  // prohibit tirar el 3, es juga la TOP més alta per a amarrar la baza.
+  return applyTwoTopsHold3FirstBaza(m, player, protect);
 }
 
 function botDecideCore(
