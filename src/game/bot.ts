@@ -1494,6 +1494,38 @@ function applyTwoTopsHold3FirstBaza(
   return act ?? decision;
 }
 
+function firstOfTeamOpeningGate(
+  m: MatchState,
+  player: PlayerId,
+  hints: BotHints,
+  tuning: BotTuning,
+): { blockEnvit: boolean; blockTruc: boolean } {
+  const r = m.round;
+  const none = { blockEnvit: false, blockTruc: false };
+  if (r.tricks.length !== 1) return none;
+  const trick = r.tricks[0];
+  const firstOfTeam = !trick?.cards.some(
+    (tc) => teamOf(tc.player) === teamOf(player) && tc.player !== player,
+  );
+  if (!firstOfTeam) return none;
+  const hand = r.hands[player] ?? [];
+  const tops = hand.filter(
+    (c) =>
+      (c.rank === 1 && (c.suit === "bastos" || c.suit === "espases")) ||
+      (c.rank === 7 && (c.suit === "espases" || c.suit === "oros")),
+  ).length;
+  const myEnv = playerTotalEnvit(r, player);
+  const envitOrdered = !!hints.forceEnvit || !!hints.partnerOrderedEnvit;
+  const trucOrdered = !!hints.forceTruc;
+  if (tuning.conservativeMode) {
+    return { blockEnvit: !envitOrdered, blockTruc: !trucOrdered };
+  }
+  return {
+    blockEnvit: !envitOrdered && !(myEnv >= 31 && tops >= 2),
+    blockTruc: !trucOrdered && tops < 2,
+  };
+}
+
 export function botDecide(
   m: MatchState,
   player: PlayerId,
@@ -1502,7 +1534,39 @@ export function botDecide(
   tuning: BotTuning = NEUTRAL_TUNING,
   bluffRate: number = 0,
 ): Action | null {
-  const decision = botDecideCore(m, player, partnerAdvice, hints, tuning, bluffRate);
+  // ---- 1r de l'equip a parlar/tirar en la 1a baza: restricció d'eixida ----
+  // · Conservador: mai envida ni truca per iniciativa pròpia.
+  // · No conservador: envit només amb ≥31 i ≥2 TOPs; truc només amb ≥2 TOPs.
+  // Les ordres explícites del company ("Envida!", "Truca!") es respecten.
+  const gate = firstOfTeamOpeningGate(m, player, hints, tuning);
+  const gatedHints: BotHints = gate.blockTruc ? { ...hints, silentTruc: true } : hints;
+  let decision = botDecideCore(m, player, partnerAdvice, gatedHints, tuning, bluffRate);
+  if (
+    decision &&
+    decision.type === "shout" &&
+    ((decision.what === "envit" && gate.blockEnvit) ||
+      (decision.what === "truc" && gate.blockTruc))
+  ) {
+    const plays = legalActions(m, player).filter(
+      (a): a is Extract<Action, { type: "play-card" }> => a.type === "play-card",
+    );
+    const hand = m.round.hands[player] ?? [];
+    let best: Action | null = null;
+    let bestS = Infinity;
+    for (const a of plays) {
+      const c = hand.find((h) => h.id === a.cardId);
+      const s = c ? cardStrength(c) : 0;
+      if (s < bestS) { bestS = s; best = { type: "play-card", cardId: a.cardId }; }
+    }
+    // Abans de descartar la baixa, deixem que la resta de regles de carta
+    // trien (core sense el cant): si el core torna a cantar, descart baix.
+    const retry = botDecideCore(
+      m, player, partnerAdvice,
+      { ...gatedHints, silentTruc: true, forceEnvit: false },
+      { ...tuning, callPropensity: 0 }, 0,
+    );
+    decision = retry && retry.type === "play-card" ? retry : best ?? decision;
+  }
   if (!decision) return decision;
   // La parda que tanca la mà té prioritat sobre qualsevol descart baix o
   // sobre "guardar la TOP" (vegeu `applyPardaClosesHand`).
@@ -1553,7 +1617,11 @@ function botDecideCore(
     if (tuning.conservativeMode && excEnvitAvailable && excFirstTrickOpen) {
       const myEnv = playerTotalEnvit(rExc, player);
       const ordered = !!hints?.partnerOrderedEnvit || !!hints?.forceEnvit;
-      if (myEnv >= 31) return { type: "shout", what: "envit" };
+      const rTrick = rExc.tricks[rExc.tricks.length - 1];
+      const firstOfTeam = !rTrick?.cards.some(
+        (tc) => teamOf(tc.player) === teamOf(player) && tc.player !== player,
+      );
+      if (myEnv >= 31 && (!firstOfTeam || ordered)) return { type: "shout", what: "envit" };
       if (myEnv === 30 && (ordered || !!hints?.partnerTincN30 || excLastSpeaker)) {
         return { type: "shout", what: "envit" };
       }
