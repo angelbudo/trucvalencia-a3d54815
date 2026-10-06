@@ -1494,6 +1494,38 @@ function applyTwoTopsHold3FirstBaza(
   return act ?? decision;
 }
 
+function firstOfTeamOpeningGate(
+  m: MatchState,
+  player: PlayerId,
+  hints: BotHints,
+  tuning: BotTuning,
+): { blockEnvit: boolean; blockTruc: boolean } {
+  const r = m.round;
+  const none = { blockEnvit: false, blockTruc: false };
+  if (r.tricks.length !== 1) return none;
+  const trick = r.tricks[0];
+  const firstOfTeam = !trick?.cards.some(
+    (tc) => teamOf(tc.player) === teamOf(player) && tc.player !== player,
+  );
+  if (!firstOfTeam) return none;
+  const hand = r.hands[player] ?? [];
+  const tops = hand.filter(
+    (c) =>
+      (c.rank === 1 && (c.suit === "bastos" || c.suit === "espases")) ||
+      (c.rank === 7 && (c.suit === "espases" || c.suit === "oros")),
+  ).length;
+  const myEnv = playerTotalEnvit(r, player);
+  const envitOrdered = !!hints.forceEnvit || !!hints.partnerOrderedEnvit;
+  const trucOrdered = !!hints.forceTruc;
+  if (tuning.conservativeMode) {
+    return { blockEnvit: !envitOrdered, blockTruc: !trucOrdered };
+  }
+  return {
+    blockEnvit: !envitOrdered && !(myEnv >= 31 && tops >= 2),
+    blockTruc: !trucOrdered && tops < 2,
+  };
+}
+
 export function botDecide(
   m: MatchState,
   player: PlayerId,
