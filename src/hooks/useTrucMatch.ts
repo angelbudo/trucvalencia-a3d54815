@@ -658,6 +658,14 @@ export function useTrucMatch(options: UseTrucMatchOptions = {}) {
     intentsRef.current.forceEnvitNext = true;
   }, []);
 
+  const setPartnerForceFalta = useCallback(() => {
+    intentsRef.current.forceFaltaNext = true;
+  }, []);
+
+  const setPartnerGaveUp = useCallback(() => {
+    intentsRef.current.gaveUpRound = true;
+  }, []);
+
   const scheduleConsultTimer = useCallback((fn: () => void, delayMs: number) => {
     const grace = Math.max(0, resumeGraceUntilRef.current - Date.now());
     delayMs = Math.max(delayMs, grace);
@@ -1863,6 +1871,8 @@ export function useTrucMatch(options: UseTrucMatchOptions = {}) {
       if (intentsRef.current.foldNextTruc) hints.foldTruc = true;
       if (intentsRef.current.forceTrucNext) hints.forceTruc = true;
       if (intentsRef.current.forceEnvitNext) hints.forceEnvit = true;
+      if (intentsRef.current.forceFaltaNext) hints.forceFalta = true;
+      if (intentsRef.current.gaveUpRound) hints.gaveUp = true;
       return hints;
     };
 
@@ -2971,6 +2981,8 @@ export function useTrucMatch(options: UseTrucMatchOptions = {}) {
     setPartnerSilentForCurrentTrick,
     setPartnerFoldNextTruc,
     setPartnerForceTruc,
+    setPartnerForceFalta,
+    setPartnerGaveUp,
     setPartnerForceEnvit,
     notifyChatPhrase,
     setForcedNextDealer,

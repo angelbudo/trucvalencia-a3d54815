@@ -151,6 +151,8 @@ function PartidaClient() {
     setPartnerSilentForCurrentTrick,
     setPartnerFoldNextTruc,
     setPartnerForceTruc,
+    setPartnerForceFalta,
+    setPartnerGaveUp,
     setPartnerForceEnvit,
     notifyChatPhrase,
   } = useTrucMatch({
@@ -280,14 +282,15 @@ function PartidaClient() {
       return;
     }
     if (phraseId === "tira-falta") {
-      const falta = humanActions.find((a) => a.type === "shout" && a.what === "falta-envit");
-      if (falta) dispatch(HUMAN, falta);
+      // Ordre al company: cantarà la falta en el seu torn si és el 2n de la parella.
+      setPartnerForceFalta();
       return;
     }
     if (phraseId === "vamonos") {
       const noVull = humanActions.find((a) => a.type === "shout" && a.what === "no-vull");
       if (noVull && r.trucState.kind === "pending") dispatch(HUMAN, noVull);
       setPartnerFoldNextTruc();
+      setPartnerGaveUp();
       return;
     }
     if (phraseId === "juega-callado") { setPartnerSilentForCurrentTrick(); return; }

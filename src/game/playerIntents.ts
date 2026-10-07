@@ -56,6 +56,10 @@ export interface PartnerIntents {
    * que sigui legal.
    */
   forceEnvitNext: boolean;
+  /** "Tira la falta!": el company ha de cantar falta-envit (si és el 2n de la parella en la 1a baza). */
+  forceFaltaNext?: boolean;
+  /** "Au! Anem-se'n!": el company dona la mà per perduda (descart baix, sense truc). */
+  gaveUpRound?: boolean;
 }
 
 export const emptyIntents = (): PartnerIntents => ({
@@ -65,6 +69,8 @@ export const emptyIntents = (): PartnerIntents => ({
   foldNextTruc: false,
   forceTrucNext: false,
   forceEnvitNext: false,
+  forceFaltaNext: false,
+  gaveUpRound: false,
 });
 
 /**
