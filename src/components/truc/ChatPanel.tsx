@@ -7,6 +7,8 @@ import { TRUC_Z_INDEX } from "@/components/truc/layers";
 
 interface ChatPanelProps {
   onSay: (phraseId: ChatPhraseId) => void;
+  /** Permet obrir els menús durant el repartiment sense enviar senyes prematures. */
+  sendingDisabled?: boolean;
   highlightPreguntes?: boolean;
   highlightRespostes?: boolean;
   highlightAltres?: boolean;
@@ -51,7 +53,7 @@ const GROUPS: Record<
   },
 };
 
-export function ChatPanel({ onSay, highlightPreguntes, highlightRespostes, highlightAltres, hiddenPhraseIds, highlightedPhraseIds, phraseVars }: ChatPanelProps) {
+export function ChatPanel({ onSay, sendingDisabled, highlightPreguntes, highlightRespostes, highlightAltres, hiddenPhraseIds, highlightedPhraseIds, phraseVars }: ChatPanelProps) {
   const t = useT();
   const [openGroup, setOpenGroup] = useState<GroupKey | null>(null);
 
@@ -135,6 +137,7 @@ export function ChatPanel({ onSay, highlightPreguntes, highlightRespostes, highl
               {activePhrases.map((p) => (
                 <button
                   key={p.id}
+                  disabled={sendingDisabled}
                   onClick={() => {
                     onSay(p.id);
                     setOpenGroup(null);

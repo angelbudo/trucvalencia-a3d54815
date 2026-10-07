@@ -3212,14 +3212,15 @@ export function TrucBoard(props: TrucBoardProps) {
         </div>
       )}
 
-      {!isSpectator && humanCardsReady && (
+      {!isSpectator && (
         <ChatPanel
           onSay={handleSay}
+          sendingDisabled={!humanCardsReady}
           highlightPreguntes={highlightPreguntesEffective}
           highlightRespostes={highlightRespostesEffective || highlightRespostes2nd || highlightRespostes2ndTrick || highlightRespostes2ndTrickLost || (isSecondInPairSecondTrick && !respostes2ndDismissed)}
           highlightAltres={highlightAltres}
           highlightedPhraseIds={highlightedPhraseIds.size > 0 ? highlightedPhraseIds : undefined}
-          hiddenPhraseIds={hiddenResponseIds.size > 0 ? hiddenResponseIds : undefined}
+          hiddenPhraseIds={humanCardsReady && !dealing && hiddenResponseIds.size > 0 ? hiddenResponseIds : undefined}
           phraseVars={{ "si-tinc-n": { n: myEnvit } }}
         />
       )}

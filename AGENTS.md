@@ -8,3 +8,5 @@
 > Commits you push to the connected branch sync back to Lovable and show up in
 > the editor, so keep the branch in a working state.
 <!-- LOVABLE:END -->
+ 
+- Keep the shared TrucBoard chat controls mounted for players during round transitions; change phrase filtering independently and block premature sending until cards are ready, so both game modes avoid flicker without changing gameplay.
