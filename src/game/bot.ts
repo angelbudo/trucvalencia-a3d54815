@@ -21,6 +21,10 @@ export interface BotHints {
    * fes-ho immediatament sense considerar la força de la mà.
    */
   forceEnvit?: boolean;
+  /** Company: "Tira la falta!" (només si el bot és el 2n de la parella en la 1a baza). */
+  forceFalta?: boolean;
+  /** Company: "Au! Anem-se'n!" — mà per perduda: descart baix i sense truc. */
+  gaveUp?: boolean;
   /**
    * Mode sincer: indica si algun rival ha mostrat força en aquesta ronda
    * dient "Vine a mi!" (vine-a-mi) o "Algo tinc" (tinc-bona). Quan és
@@ -1538,6 +1542,13 @@ export function botDecide(
   // · Conservador: mai envida ni truca per iniciativa pròpia.
   // · No conservador: envit només amb ≥31 i ≥2 TOPs; truc només amb ≥2 TOPs.
   // Les ordres explícites del company ("Envida!", "Truca!") es respecten.
+  // "Juga callat" / "Au! Anem-se'n!" queden invalidades si el bot porta
+  // dues TOPs i no ho ha comunicat al company (no ha dit "Algo tinc").
+  if ((hints.silentTruc || hints.gaveUp) && hasTwoTopsUnknown(m, player, hints)) {
+    hints = { ...hints, silentTruc: false, gaveUp: false, foldTruc: false };
+  } else if (hints.gaveUp) {
+    hints = { ...hints, silentTruc: true };
+  }
   const gate = firstOfTeamOpeningGate(m, player, hints, tuning);
   const gatedHints: BotHints = gate.blockTruc ? { ...hints, silentTruc: true } : hints;
   let decision = botDecideCore(m, player, partnerAdvice, gatedHints, tuning, bluffRate);
@@ -1577,7 +1588,119 @@ export function botDecide(
   // "Dues TOPs + un 3, sense As d'espases" és l'última paraula de la 1a baza:
   // prohibit tirar el 3, es juga la TOP més alta per a amarrar la baza.
   const twoTops = applyTwoTopsHold3FirstBaza(m, player, protect);
-  return applyTrucBeforeTopSecondBaza(m, player, tuning, twoTops);
+  const trucTop = applyTrucBeforeTopSecondBaza(m, player, tuning, twoTops);
+  // Les ordres explícites del company són l'última paraula.
+  return applyPartnerOrders(m, player, hints, trucTop);
+}
+
+const isTopCardB = (c: Card) =>
+  (c.rank === 1 && (c.suit === "bastos" || c.suit === "espases")) ||
+  (c.rank === 7 && (c.suit === "espases" || c.suit === "oros"));
+
+function hasTwoTopsUnknown(m: MatchState, player: PlayerId, hints: BotHints): boolean {
+  const hand = m.round.hands[player] ?? [];
+  return hand.filter(isTopCardB).length >= 2 && !hints.saidAlgoTinc;
+}
+
+const TRUC_SHOUTS = new Set(["truc", "retruc", "quatre", "joc-fora"]);
+
+/**
+ * Resposta a les ordres del company:
+ *  - "Tira la falta!": falta-envit si és el 2n de la parella en la 1a baza.
+ *  - "Truca!": truc obligatori abans de tirar (si és legal).
+ *  - "Fica algo fort!": TOP (preferint no l'As d'espases); truc abans si la 1a baza és nostra.
+ *  - "Fica algo que moleste!": 1a guanyada → 3 (o carta mitjana/alta);
+ *    si no → 7 oros/7 espases, si no un 3.
+ *  - "Vaig al teu tres!": tira un 3 obligatòriament.
+ *  - "Juga callat!" / "Au! Anem-se'n!": prohibit trucar (Anem-se'n: descart baix).
+ */
+function applyPartnerOrders(
+  m: MatchState,
+  player: PlayerId,
+  hints: BotHints,
+  decision: Action | null,
+): Action | null {
+  if (!decision) return decision;
+  const r = m.round;
+  if (r.trucState.kind === "pending" || r.envitState.kind === "pending") return decision;
+  const actions = legalActions(m, player);
+  if (actions.length === 0) return decision;
+  const shout = (what: string) =>
+    actions.find((a) => a.type === "shout" && a.what === what) ?? null;
+  const hand = r.hands[player] ?? [];
+  const playable = actions
+    .filter((a): a is Extract<Action, { type: "play-card" }> => a.type === "play-card")
+    .map((a) => hand.find((h) => h.id === a.cardId))
+    .filter((c): c is Card => !!c && isRealCard(c));
+  const play = (c: Card): Action => ({ type: "play-card", cardId: c.id });
+  const asc = [...playable].sort((a, b) => cardStrength(a) - cardStrength(b));
+  const trickIdx = r.tricks.length - 1;
+  const t0 = r.tricks[0];
+  const wonFirst =
+    trickIdx >= 1 && !!t0 && !t0.parda && t0.winner !== undefined && teamOf(t0.winner) === teamOf(player);
+  const silent = !!hints.silentTruc || !!hints.gaveUp;
+
+  // 7. Tira la falta (2n de la parella en la 1a baza).
+  if (hints.forceFalta && trickIdx === 0 && r.envitState.kind === "none") {
+    const d = (p: PlayerId) => (p - r.mano + 4) % 4;
+    const partner = ((player + 2) % 4) as PlayerId;
+    if (d(player) > d(partner)) {
+      const f = shout("falta-envit");
+      if (f) return f;
+    }
+  }
+
+  // 1. Truca!
+  if (hints.forceTruc && !silent) {
+    const t = shout("truc");
+    if (t) return t;
+  }
+
+  // 5/6. Prohibit trucar.
+  if (silent && decision.type === "shout" && TRUC_SHOUTS.has(decision.what)) {
+    return asc[0] ? play(asc[0]) : decision;
+  }
+
+  // 2. Fica algo fort.
+  if (hints.cardHint === "fort") {
+    const tops = playable.filter(isTopCardB).sort((a, b) => cardStrength(b) - cardStrength(a));
+    const pick = tops.find((c) => !(c.rank === 1 && c.suit === "espases")) ?? tops[0];
+    if (pick) {
+      if (wonFirst && !silent && r.trucState.kind === "none") {
+        const t = shout("truc");
+        if (t) return t;
+      }
+      return play(pick);
+    }
+    return decision;
+  }
+
+  // 3. Fica algo que moleste.
+  if (hints.cardHint === "molesto") {
+    if (wonFirst) {
+      const tres = asc.find((c) => c.rank === 3);
+      if (tres) return play(tres);
+      const mid = [...asc].reverse().find((c) => !isTopCardB(c) && cardStrength(c) >= cardStrength({ rank: 6, suit: "oros", id: "x" } as Card));
+      return mid ? play(mid) : decision;
+    }
+    const seven =
+      playable.find((c) => c.rank === 7 && c.suit === "oros") ??
+      playable.find((c) => c.rank === 7 && c.suit === "espases");
+    if (seven) return play(seven);
+    const tres = asc.find((c) => c.rank === 3);
+    return tres ? play(tres) : decision;
+  }
+
+  // 4. Vaig al teu tres.
+  if (hints.cardHint === "tres") {
+    const tres = asc.find((c) => c.rank === 3);
+    if (tres) return play(tres);
+  }
+
+  // 6. Anem-se'n: descart baix.
+  if (hints.gaveUp && decision.type === "play-card" && asc[0]) return play(asc[0]);
+
+  return decision;
 }
 
 /**
