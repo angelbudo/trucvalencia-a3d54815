@@ -1576,7 +1576,47 @@ export function botDecide(
   const protect = applyProtect3VsRivalSignals(m, player, hints, algo);
   // "Dues TOPs + un 3, sense As d'espases" és l'última paraula de la 1a baza:
   // prohibit tirar el 3, es juga la TOP més alta per a amarrar la baza.
-  return applyTwoTopsHold3FirstBaza(m, player, protect);
+  const twoTops = applyTwoTopsHold3FirstBaza(m, player, protect);
+  return applyTrucBeforeTopSecondBaza(m, player, tuning, twoTops);
+}
+
+/**
+ * 2a baza amb la 1a guanyada pel meu equip: si el bot va a tirar una carta
+ * TOP (As espases/bastos, 7 espases/oros) sense truc cantat, ha de TRUCAR
+ * abans. Si pel seu perfil (conservador) no truca, no gasta la TOP: tira la
+ * carta més baixa i la guarda per a la 3a baza o per a defendre's d'un truc.
+ */
+function applyTrucBeforeTopSecondBaza(
+  m: MatchState,
+  player: PlayerId,
+  tuning: BotTuning,
+  decision: Action | null,
+): Action | null {
+  if (!decision || decision.type !== "play-card" || decision.covered) return decision;
+  const r = m.round;
+  if (r.tricks.length !== 2) return decision;
+  const t1 = r.tricks[0];
+  if (t1?.parda || t1?.winner === undefined || teamOf(t1.winner) !== teamOf(player)) {
+    return decision;
+  }
+  if (r.trucState.kind !== "none") return decision;
+  const hand = r.hands[player] ?? [];
+  const card = hand.find((c) => c.id === decision.cardId);
+  const isTop = (c: Card) =>
+    (c.rank === 1 && (c.suit === "bastos" || c.suit === "espases")) ||
+    (c.rank === 7 && (c.suit === "espases" || c.suit === "oros"));
+  if (!card || !isTop(card)) return decision;
+  const actions = legalActions(m, player);
+  const truc = actions.find((a) => a.type === "shout" && a.what === "truc");
+  if (truc && !tuning.conservativeMode) return truc;
+  // Sense truc → guardar la TOP i tirar la més baixa.
+  let lowest: Card | null = null;
+  for (const a of actions) {
+    if (a.type !== "play-card") continue;
+    const c = hand.find((h) => h.id === a.cardId);
+    if (c && (!lowest || cardStrength(c) < cardStrength(lowest))) lowest = c;
+  }
+  return lowest ? { type: "play-card", cardId: lowest.id } : decision;
 }
 
 function botDecideCore(
