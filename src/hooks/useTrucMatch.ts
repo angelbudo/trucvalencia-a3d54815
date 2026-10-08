@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePausableTimers } from "@/components/truc/usePausableTimers";
 import { Action, MatchState, PlayerId, ShoutKind, partnerOf, nextPlayer, teamOf } from "@/game/types";
 import { applyAction, createMatch, dealRound, isCamaMatchPoint, legalActions, startNextRound } from "@/game/engine";
-import { botDecide } from "@/game/bot";
+import { botDecide, type BotHints } from "@/game/bot";
 import { bestEnvit, playerTotalEnvit, cardStrength, asEspasesPlayedFirstTrick } from "@/game/deck";
 import { computeShoutDisplay } from "@/game/shoutDisplay";
 import { useShoutFlashes } from "@/game/useShoutFlash";
@@ -721,11 +721,11 @@ export function useTrucMatch(options: UseTrucMatchOptions = {}) {
     }
     // 2) Instrucció / resposta del company al peu-bot que està esperant
     // com a 2n en tirar la 1a baza. Accepta tant les instruccions
-    // directes ("envida"/"tira-falta") com la resposta a la pregunta
-    // "Tens envit?" ("si"/"no") que el bot acaba de fer.
+    // directes ("envida"/"tira-falta"/"vamonos") com la resposta a la
+    // pregunta "Tens envit?" ("si"/"no") que el bot acaba de fer.
     const waiting = pendingSecondWaitRef.current;
     if (waiting && player === partnerOf(waiting.botPlayer)) {
-      const accepted: ChatPhraseId[] = ["envida", "tira-falta", "si", "no"];
+      const accepted: ChatPhraseId[] = ["envida", "tira-falta", "vamonos", "si", "no"];
       if (accepted.includes(phraseId)) {
         if (waiting.mandatory) {
           // Excepció: si el company li diu al peu-bot que envide
@@ -733,7 +733,9 @@ export function useTrucMatch(options: UseTrucMatchOptions = {}) {
           // 7-10 s, NO ha d'esperar més: cancel·lem la finestra perquè
           // el bot processe immediatament la seua decisió i cante
           // l'envit que el company li ha demanat.
-          if (phraseId === "envida" || phraseId === "tira-falta") {
+          // "vamonos" ("Au! Anem-se'n!") també cancel·la l'espera, però
+          // mai com a envit: el bot ha de descartar baix i no trucar.
+          if (phraseId === "envida" || phraseId === "tira-falta" || phraseId === "vamonos") {
             const waitKey = waiting.waitKey;
             window.clearTimeout(waiting.timer);
             if (waiting.partnerBotTimer) {
@@ -743,7 +745,8 @@ export function useTrucMatch(options: UseTrucMatchOptions = {}) {
             completedMandatorySecondWaitsRef.current.add(waitKey);
             // Si el company és l'humà, marquem l'intent forceEnvitNext
             // perquè botDecide prioritze l'envit en el pròxim càlcul.
-            if (player === HUMAN) {
+            // Amb "vamonos" NO: la mà es dona per perduda.
+            if (player === HUMAN && phraseId !== "vamonos") {
               intentsRef.current.forceEnvitNext = true;
             }
             setMandatorySecondWaitTick((tick) => tick + 1);
@@ -1762,20 +1765,10 @@ export function useTrucMatch(options: UseTrucMatchOptions = {}) {
     }
 
     const buildHints = () => {
-      const hints: {
-        cardHint?: CardHint;
-        playStrength?: PlayStrengthHint;
-        silentTruc?: boolean;
-        foldTruc?: boolean;
-        forceTruc?: boolean;
-        forceEnvit?: boolean;
-        rivalShownStrength?: boolean;
-        saidAlgoTinc?: boolean;
-        partnerSaidATu?: boolean;
-        partnerOrderedEnvit?: boolean;
-        partnerTincN30?: boolean;
-        rivalStrengthSignalers?: PlayerId[];
-      } = {};
+      // Un únic tipus compartit amb `botDecide` (src/game/bot.ts): si el bot
+      // afegeix una senyal nova (p. ex. `forceFalta` / `gaveUp`), el compilador
+      // avisa ací i no es pot quedar desincronitzada.
+      const hints: BotHints = {};
       // Mode sincer: detecta si algun rival d'aquest bot ha dit
       // "vine-a-mi" o "tinc-bona" en aquesta ronda. Aplica per a TOTS
       // els bots (no només els que tenen humà de company).
@@ -2004,15 +1997,15 @@ export function useTrucMatch(options: UseTrucMatchOptions = {}) {
       consultStartedRef.current.add(waitKey);
 
       // Short-circuit: si el company JA ha dit "Envida!" / "Tira la falta!"
-      // / "Sí" / "No" / "Tinc {n}" abans que el peu-bot arribara al seu
-      // torn (per exemple, l'humà ho ha dit espontàniament), no esperem
-      // res: actuem immediatament amb aquesta resposta com a instrucció.
-      // Així evitem que el bot es quede esperant una resposta a una
-      // pregunta que el company ja havia contestat.
+      // / "Au! Anem-se'n!" / "Sí" / "No" / "Tinc {n}" abans que el peu-bot
+      // arribara al seu torn (per exemple, l'humà ho ha dit espontàniament),
+      // no esperem res: actuem immediatament amb aquesta resposta com a
+      // instrucció. Així evitem que el bot es quede esperant una resposta a
+      // una pregunta que el company ja havia contestat.
       {
         const partnerEarly = partnerForSecondWait;
         const earlySpoken = chatSignalsRef.current[partnerEarly] ?? [];
-        const earlyInstructions: ChatPhraseId[] = ["envida", "tira-falta", "si", "no", "si-tinc-n"];
+        const earlyInstructions: ChatPhraseId[] = ["envida", "tira-falta", "vamonos", "si", "no", "si-tinc-n"];
         const earlyHit = [...earlySpoken].reverse().find((p) => earlyInstructions.includes(p));
         if (earlyHit) {
           const canEnvitEarly = legalActions(match, botPlayer).some(
