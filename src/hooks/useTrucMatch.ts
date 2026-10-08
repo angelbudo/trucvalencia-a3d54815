@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePausableTimers } from "@/components/truc/usePausableTimers";
 import { Action, MatchState, PlayerId, ShoutKind, partnerOf, nextPlayer, teamOf } from "@/game/types";
 import { applyAction, createMatch, dealRound, isCamaMatchPoint, legalActions, startNextRound } from "@/game/engine";
-import { botDecide } from "@/game/bot";
+import { botDecide, type BotHints } from "@/game/bot";
 import { bestEnvit, playerTotalEnvit, cardStrength, asEspasesPlayedFirstTrick } from "@/game/deck";
 import { computeShoutDisplay } from "@/game/shoutDisplay";
 import { useShoutFlashes } from "@/game/useShoutFlash";
@@ -1762,20 +1762,10 @@ export function useTrucMatch(options: UseTrucMatchOptions = {}) {
     }
 
     const buildHints = () => {
-      const hints: {
-        cardHint?: CardHint;
-        playStrength?: PlayStrengthHint;
-        silentTruc?: boolean;
-        foldTruc?: boolean;
-        forceTruc?: boolean;
-        forceEnvit?: boolean;
-        rivalShownStrength?: boolean;
-        saidAlgoTinc?: boolean;
-        partnerSaidATu?: boolean;
-        partnerOrderedEnvit?: boolean;
-        partnerTincN30?: boolean;
-        rivalStrengthSignalers?: PlayerId[];
-      } = {};
+      // Un únic tipus compartit amb `botDecide` (src/game/bot.ts): si el bot
+      // afegeix una senyal nova (p. ex. `forceFalta` / `gaveUp`), el compilador
+      // avisa ací i no es pot quedar desincronitzada.
+      const hints: BotHints = {};
       // Mode sincer: detecta si algun rival d'aquest bot ha dit
       // "vine-a-mi" o "tinc-bona" en aquesta ronda. Aplica per a TOTS
       // els bots (no només els que tenen humà de company).
