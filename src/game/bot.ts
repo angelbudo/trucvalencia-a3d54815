@@ -1785,7 +1785,13 @@ function botDecideCore(
         (tc) => teamOf(tc.player) === teamOf(player) && tc.player !== player,
       );
       if (myEnv >= 31 && (!firstOfTeam || ordered)) return { type: "shout", what: "envit" };
-      if (myEnv === 30 && (ordered || !!hints?.partnerTincN30 || excLastSpeaker)) {
+      // 3r a tirar de la 1a baza (2 cartes a la taula): amb ≤30 només si el
+      // company li ho ha ordenat; ni "Tinc N" ni cap altra excepció val.
+      const excThirdSeat = (rTrick?.cards.length ?? 0) === 2;
+      if (myEnv === 30 && !excThirdSeat && (ordered || !!hints?.partnerTincN30 || excLastSpeaker)) {
+        return { type: "shout", what: "envit" };
+      }
+      if (myEnv === 30 && excThirdSeat && ordered) {
         return { type: "shout", what: "envit" };
       }
       if (myEnv < 30 && ordered) return { type: "shout", what: "envit" };
@@ -2738,12 +2744,19 @@ function botDecideInner(
     r.tricks.length === 1 &&
     r.envitState.kind === "none" &&
     (r.tricks[r.tricks.length - 1]?.cards.length ?? 0) === 3;
+  // 3r a tirar de la 1a baza (2 cartes a la taula): el conservador amb ≤30
+  // només envida si el company li ho ha ordenat (envit mínim 31 altrament).
+  const conservativeEnvitThirdSeat =
+    r.tricks.length === 1 &&
+    (r.tricks[r.tricks.length - 1]?.cards.length ?? 0) === 2;
   const conservativeOrdered = !!hints.partnerOrderedEnvit;
   const conservativeCanEnvit =
     canEnvit &&
     (!conservativeEnvitBlocked ||
       conservativeOrdered ||
-      (myEnvit === 30 && (conservativeEnvitLastSpeak || !!hints.partnerTincN30)));
+      (myEnvit === 30 &&
+        !conservativeEnvitThirdSeat &&
+        (conservativeEnvitLastSpeak || !!hints.partnerTincN30)));
   // Estratègia: la MÀ (primer jugador de la pareja) NO envida proactivament.
   // En lloc d'envidar i encadenar truc (combo "Envit + Truc" que sol donar
   // pocs punts perquè el rival pot rebutjar el truc i quedar-se l'envit
